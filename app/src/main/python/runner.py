@@ -1,5 +1,4 @@
 import sys
-import importlib.util
 import traceback
 import os
 
@@ -45,11 +44,14 @@ def run(path, args_str=""):
     sys.stdout = Stream()
     sys.stderr = Stream()
     sys.argv = [path] + ([a for a in args_str.split("\0") if a] if args_str else [])
+    if not os.path.isfile(path):
+        TerminalIO.append("[ошибка] файл не найден: %s\n" % path)
+        TerminalIO.finished()
+        return
     try:
-        spec = importlib.util.spec_from_file_location("user_script", path)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules["user_script"] = module
-        spec.loader.exec_module(module)
+        with open(path, "rb") as f:
+            code = compile(f.read(), path, "exec")
+        exec(code, {"__name__": "__main__", "__file__": path, "__builtins__": __builtins__})
     except SystemExit:
         pass
     except BaseException:
