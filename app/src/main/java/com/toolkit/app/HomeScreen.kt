@@ -69,7 +69,7 @@ fun HomeScreen(onOpenPython: () -> Unit) {
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            "мини-терминал · зависимости встроены",
+                            "мини-терминал · пакеты ставятся автоматически",
                             color = TextDim,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(top = 2.dp),

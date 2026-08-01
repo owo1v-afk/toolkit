@@ -21,8 +21,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
@@ -249,7 +252,7 @@ fun PythonScreen(onBack: () -> Unit) {
                             )
                         } else {
                             Text(
-                                "не найдено в сборке: ${status.missing.joinToString(", ")}",
+                                "не найдено: ${status.missing.joinToString(", ")} — скачаются сами при первом import",
                                 color = WarnOrange,
                                 fontSize = 12.sp,
                             )
@@ -301,18 +304,35 @@ fun PythonScreen(onBack: () -> Unit) {
 
 @Composable
 fun TerminalView(output: String, input: String, onInput: (String) -> Unit, onSend: () -> Unit) {
+    val clipboard = LocalClipboardManager.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(TerminalBg, RoundedCornerShape(22.dp))
             .padding(14.dp),
     ) {
-        Text(
-            "mini-term",
-            color = TextDim,
-            fontSize = 11.sp,
-            fontFamily = FontFamily.Monospace,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "mini-term",
+                color = TextDim,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                "⧉ копировать",
+                color = Accent,
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) {
+                        clipboard.setText(AnnotatedString(output))
+                    },
+            )
+        }
         Spacer(Modifier.height(8.dp))
         Text(
             output.ifBlank { "_" },
