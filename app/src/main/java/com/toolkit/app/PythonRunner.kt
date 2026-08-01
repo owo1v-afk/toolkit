@@ -3,7 +3,6 @@ package com.toolkit.app
 import android.content.Context
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
-import java.io.File
 
 object PythonRunner {
 
@@ -37,9 +36,7 @@ object PythonRunner {
         Thread({
             try {
                 val py = Python.getInstance()
-                val argv = java.util.ArrayList<String>()
-                argv.add(File(scriptPath).name)
-                py.getModule("runner").callAttr("run", scriptPath, argv)
+                py.getModule("runner").callAttr("run", scriptPath, "")
             } catch (t: Throwable) {
                 TerminalIO.append("Ошибка запуска: ${t.message}\n")
             } finally {

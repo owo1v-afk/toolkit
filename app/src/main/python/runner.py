@@ -40,11 +40,11 @@ class Stream(object):
         pass
 
 
-def run(path, argv):
+def run(path, args_str=""):
     sys.stdin = Stream()
     sys.stdout = Stream()
     sys.stderr = Stream()
-    sys.argv = [path] + list(argv)
+    sys.argv = [path] + ([a for a in args_str.split("\0") if a] if args_str else [])
     try:
         spec = importlib.util.spec_from_file_location("user_script", path)
         module = importlib.util.module_from_spec(spec)
