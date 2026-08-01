@@ -58,7 +58,6 @@ chaquopy {
             install("colorama")
             install("beautifulsoup4")
             install("httpx")
-            install("jinja2")
         }
     }
 }

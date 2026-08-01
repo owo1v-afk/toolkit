@@ -44,7 +44,6 @@ private val bundledDeps = mapOf(
     "colorama" to "colorama",
     "bs4" to "beautifulsoup4",
     "httpx" to "httpx",
-    "jinja2" to "jinja2",
 )
 
 private val stdlib = setOf(
