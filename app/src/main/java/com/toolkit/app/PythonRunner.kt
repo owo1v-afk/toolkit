@@ -1,8 +1,8 @@
 package com.toolkit.app
 
 import android.content.Context
-import com.chaquo.python.AndroidPlatform
 import com.chaquo.python.Python
+import com.chaquo.python.android.AndroidPlatform
 import java.io.File
 
 object PythonRunner {

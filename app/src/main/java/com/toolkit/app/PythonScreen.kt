@@ -119,7 +119,7 @@ fun PythonScreen(onBack: () -> Unit) {
             val dest = File(dir, safeName)
             dest.writeBytes(bytes)
             fileName = safeName
-            fileSize = bytes.size
+            fileSize = bytes.size.toLong()
             filePath = dest.absolutePath
             preview = content.lines().take(8).joinToString("\n").ifBlank { "(пустой файл)" }
             deps = scanDeps(content)
