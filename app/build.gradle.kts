@@ -56,9 +56,7 @@ chaquopy {
         pip {
             install("requests")
             install("colorama")
-            install("pyyaml")
             install("beautifulsoup4")
-            install("aiohttp")
             install("httpx")
             install("jinja2")
         }

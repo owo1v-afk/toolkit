@@ -42,9 +42,7 @@ import java.io.File
 private val bundledDeps = mapOf(
     "requests" to "requests",
     "colorama" to "colorama",
-    "yaml" to "pyyaml",
     "bs4" to "beautifulsoup4",
-    "aiohttp" to "aiohttp",
     "httpx" to "httpx",
     "jinja2" to "jinja2",
 )
