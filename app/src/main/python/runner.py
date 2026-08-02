@@ -185,9 +185,18 @@ def _extract(blob, dest):
             os.makedirs(os.path.dirname(target), exist_ok=True)
             with z.open(name) as src, open(target, "wb") as dst:
                 dst.write(src.read())
-    if os.path.isdir(dest):
-        shutil.rmtree(dest)
-    os.replace(tmp, dest)
+    for entry in os.listdir(tmp):
+        src = os.path.join(tmp, entry)
+        dst = os.path.join(dest, entry)
+        if os.path.isdir(src):
+            if os.path.isdir(dst):
+                shutil.rmtree(dst)
+            shutil.move(src, dst)
+        else:
+            if os.path.isfile(dst):
+                os.remove(dst)
+            shutil.move(src, dst)
+    shutil.rmtree(tmp)
     if INSTALL_DIR not in sys.path:
         sys.path.insert(0, INSTALL_DIR)
 
@@ -206,7 +215,7 @@ def _install(pkg, echo=True, version=None):
             TerminalIO.progress(pkg, -1)
             return False
         blob = _download(url, pkg)
-        _extract(blob, os.path.join(INSTALL_DIR, pkg))
+        _extract(blob, INSTALL_DIR)
         _skip.discard(pkg)
         TerminalIO.progress(pkg, -1)
         if echo:
@@ -225,7 +234,7 @@ def _install_url(url):
     TerminalIO.append("[автоустановка] скачиваю %s по прямой ссылке…\n" % name)
     try:
         blob = _download(url, name)
-        _extract(blob, os.path.join(INSTALL_DIR, name))
+        _extract(blob, INSTALL_DIR)
         _skip.discard(name)
         TerminalIO.progress(name, -1)
         TerminalIO.append("[автоустановка] %s установлен ✓\n" % name)
@@ -249,9 +258,13 @@ class AutoInstallFinder(object):
     def find_spec(self, fullname, path=None, target=None):
         if fullname in sys.modules:
             return None
+        top = fullname.split(".")[0]
+        broken = os.path.join(INSTALL_DIR, top, top)
+        if os.path.isdir(broken):
+            shutil.rmtree(os.path.join(INSTALL_DIR, top))
+            _skip.discard(top)
         if self._available(fullname):
             return None
-        top = fullname.split(".")[0]
         if top in PLATFORM_STDLIB or top.startswith("_"):
             return None
         pkg = PKG_ALIASES.get(top, top)
