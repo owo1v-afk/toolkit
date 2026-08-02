@@ -3,13 +3,11 @@ package com.toolkit.app
 import android.os.Handler
 import android.os.Looper
 import java.util.concurrent.LinkedBlockingQueue
-import java.util.regex.Pattern
 
 object TerminalIO {
 
     private val main = Handler(Looper.getMainLooper())
     private val inputQueue = LinkedBlockingQueue<String>()
-    private val ansi = Pattern.compile("\u001B\\[[0-9;?]*[a-zA-Z]|\u001B\\([0-9A-Za-z]|\u001B[=>]")
 
     @Volatile
     var onAppend: ((String) -> Unit)? = null
@@ -20,6 +18,20 @@ object TerminalIO {
     @Volatile
     var onProgress: ((String, Int) -> Unit)? = null
 
+    @Volatile
+    var cancelled = false
+
+    @JvmStatic
+    fun reset() {
+        cancelled = false
+    }
+
+    @JvmStatic
+    fun cancel() {
+        cancelled = true
+        inputQueue.offer("")
+    }
+
     @JvmStatic
     fun progress(pkg: String, percent: Int) {
         main.post { onProgress?.invoke(pkg, percent) }
@@ -27,8 +39,7 @@ object TerminalIO {
 
     @JvmStatic
     fun append(s: String) {
-        val clean = ansi.matcher(s).replaceAll("").replace("\r", "")
-        main.post { onAppend?.invoke(clean) }
+        main.post { onAppend?.invoke(s) }
     }
 
     @JvmStatic

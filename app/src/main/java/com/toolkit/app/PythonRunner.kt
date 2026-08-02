@@ -26,9 +26,9 @@ object PythonRunner {
         ensureStarted(context)
     }
 
-    fun run(context: Context, scriptPath: String, onResult: (String) -> Unit) {
+    fun run(context: Context, scriptPath: String) {
         if (running) {
-            onResult("Скрипт уже выполняется.")
+            TerminalIO.append("Скрипт уже выполняется. Нажмите Стоп или дождитесь завершения.\n")
             return
         }
         ensureStarted(context)

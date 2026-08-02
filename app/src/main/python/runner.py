@@ -62,6 +62,8 @@ def _open(url, timeout):
 
 class Stream(object):
     def write(self, s):
+        if TerminalIO.cancelled:
+            raise SystemExit("(остановлено пользователем)")
         if isinstance(s, bytes):
             s = s.decode("utf-8", "replace")
         TerminalIO.append(str(s))
@@ -70,6 +72,8 @@ class Stream(object):
         pass
 
     def readline(self):
+        if TerminalIO.cancelled:
+            raise SystemExit("(остановлено пользователем)")
         line = TerminalIO.readInput()
         stripped = line.strip()
         if stripped.startswith("pip install "):
@@ -280,12 +284,15 @@ class AutoInstallFinder(object):
 
 
 def run(path, args_str=""):
-    global INSTALL_DIR
+    global INSTALL_DIR, _skip
     INSTALL_DIR = os.path.join(os.environ.get("HOME", "/data/data/com.toolkit.app/files"), "pymods")
     os.makedirs(INSTALL_DIR, exist_ok=True)
     if INSTALL_DIR not in sys.path:
         sys.path.insert(0, INSTALL_DIR)
-    sys.meta_path.insert(0, AutoInstallFinder())
+    if not any(isinstance(f, AutoInstallFinder) for f in sys.meta_path):
+        sys.meta_path.insert(0, AutoInstallFinder())
+    _skip = set()
+    TerminalIO.reset()
     sys.stdin = Stream()
     sys.stdout = Stream()
     sys.stderr = Stream()
