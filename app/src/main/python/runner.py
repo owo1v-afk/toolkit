@@ -203,14 +203,17 @@ def _download(url, pkg):
         total = int(total) if total else 0
         blob = b""
         read = 0
+        last = -1
         while True:
             chunk = resp.read(65536)
             if not chunk:
                 break
             blob += chunk
             read += len(chunk)
-            if total:
-                TerminalIO.progress(pkg, max(0, min(100, int(read * 100 / total))))
+            pct = 0 if not total else max(0, min(100, int(read * 100 / total)))
+            if pct != last:
+                last = pct
+                TerminalIO.progress(pkg, pct)
     return blob
 
 
@@ -339,6 +342,7 @@ def _install(pkg, echo=True, version=None, _depth=0):
     if echo:
         TerminalIO.append("[автоустановка] скачиваю %s…\n" % pkg)
     try:
+        TerminalIO.progress(pkg, 0)
         url, errors = _wheel_url(pkg, version)
         if not url:
             if errors:
@@ -381,6 +385,7 @@ def _install_url(url):
     name = re.sub(r"-(\d.*)$", "", fname) or "pkg"
     TerminalIO.append("[автоустановка] скачиваю %s по прямой ссылке…\n" % name)
     try:
+        TerminalIO.progress(name, 0)
         blob = _download(url, name)
         _extract(blob, INSTALL_DIR)
         _skip.discard(name)

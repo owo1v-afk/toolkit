@@ -28,8 +28,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -453,70 +451,106 @@ fun PythonScreen(onBack: () -> Unit) {
                                 fontSize = 14.sp,
                             )
                             Spacer(Modifier.weight(1f))
+                            val pct by animateFloatAsState(
+                                targetValue = if (dl.second > 0) dl.second / 100f else 0f,
+                                animationSpec = tween(200),
+                                label = "dl",
+                            )
                             Text(
-                                "${dl.second}%",
+                                if (dl.second > 0) "${(pct * 100).toInt()}%" else "…",
                                 color = Accent,
                                 fontSize = 15.sp,
                                 fontFamily = FontFamily.Monospace,
                             )
                         }
                         Spacer(Modifier.height(10.dp))
-                        val pct by animateFloatAsState(
-                            targetValue = dl.second / 100f,
-                            animationSpec = tween(200),
-                            label = "dl",
-                        )
-                        LinearProgressIndicator(
-                            progress = { pct },
-                            color = Accent,
-                            trackColor = Color(0x22FFFFFF),
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                        if (dl.second > 0) {
+                            LinearProgressIndicator(
+                                progress = { pct },
+                                color = Accent,
+                                trackColor = Color(0x22FFFFFF),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } else {
+                            LinearProgressIndicator(
+                                color = Accent,
+                                trackColor = Color(0x22FFFFFF),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
                     }
                 }
             }
             Spacer(Modifier.height(18.dp))
-            TerminalView(output = output, input = input, onInput = { input = it }, onSend = {
-                val line = input
-                output += "\n> $line\n"
-                TerminalIO.submit(line)
-                input = ""
-            })
+            TerminalView(
+                output = output,
+                input = input,
+                onInput = { input = it },
+                onSend = {
+                    val line = input
+                    output += "\n> $line\n"
+                    TerminalIO.submit(line)
+                    input = ""
+                },
+                onClear = {
+                    output = ""
+                    synchronized(outBuffer) { outBuffer.clear() }
+                },
+            )
         }
     }
 }
 
 @Composable
-fun TerminalView(output: String, input: String, onInput: (String) -> Unit, onSend: () -> Unit) {
+fun TermIconButton(label: String, color: Color = TextDim, size: Float = 12f, onClick: () -> Unit) {
+    Text(
+        label,
+        color = color,
+        fontSize = size.sp,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    )
+}
+
+@Composable
+fun TerminalView(
+    output: String,
+    input: String,
+    onInput: (String) -> Unit,
+    onSend: () -> Unit,
+    onClear: () -> Unit,
+) {
     val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
     var termScale by remember { mutableFloatStateOf(1f) }
+    var collapsed by remember { mutableStateOf(false) }
+    var follow by remember { mutableStateOf(true) }
+    val vScroll = rememberScrollState()
+    val hScroll = rememberScrollState()
+    val display = remember(output) { parseAnsi(output) }
+
+    LaunchedEffect(output, follow) {
+        if (follow) vScroll.scrollTo(vScroll.maxValue)
+    }
     LaunchedEffect(copied) {
         if (copied) {
             delay(1400)
             copied = false
         }
     }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(TerminalBg, RoundedCornerShape(20.dp))
-            .padding(10.dp)
-            .pointerInput(Unit) {
-                detectTransformGestures { _, _, zoom, _ ->
-                    termScale = (termScale * zoom).coerceIn(0.5f, 3f)
-                }
-            }
-            .pointerInput(Unit) {
-                detectTapGestures(onDoubleTap = { termScale = 1f })
-            }
-            .graphicsLayer {
-                scaleX = termScale
-                scaleY = termScale
-                transformOrigin = TransformOrigin(0f, 0f)
-            },
+            .padding(10.dp),
     ) {
-        val display = remember(output) { parseAnsi(output) }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "mini-term",
@@ -525,62 +559,110 @@ fun TerminalView(output: String, input: String, onInput: (String) -> Unit, onSen
                 fontFamily = FontFamily.Monospace,
             )
             Spacer(Modifier.weight(1f))
-            Text(
-                "×" + "%.1f".format(termScale),
-                color = TextDim,
-                fontSize = 9.sp,
-                fontFamily = FontFamily.Monospace,
-            )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                if (copied) "✓ скопировано" else "⧉ копировать",
+            TermIconButton(
+                if (copied) "✓" else "⧉",
                 color = if (copied) OkGreen else Accent,
-                fontSize = 11.sp,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) {
-                        clipboard.setText(AnnotatedString(display.text))
-                        copied = true
-                    },
-            )
+                size = 13f,
+            ) {
+                clipboard.setText(AnnotatedString(display.text))
+                copied = true
+            }
+            TermIconButton("⌫", size = 13f, onClick = onClear)
+            TermIconButton(
+                if (follow) "⤓" else "⤒",
+                color = if (follow) Accent else TextDim,
+                size = 13f,
+            ) { follow = !follow }
+            TermIconButton(if (collapsed) "▸" else "▾", size = 13f) { collapsed = !collapsed }
         }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            display,
-            color = TerminalText,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 10.sp,
-            lineHeight = 13.sp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .heightIn(min = 140.dp, max = 320.dp),
-        )
-        Spacer(Modifier.height(8.dp))
-        OutlinedTextField(
-            value = input,
-            onValueChange = onInput,
-            singleLine = true,
-            placeholder = { Text("ввод…", color = TextDim, fontSize = 12.sp) },
-            textStyle = TextStyle(
-                color = TerminalText,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 12.sp,
-            ),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            keyboardActions = KeyboardActions(onSend = { onSend() }),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Accent,
-                unfocusedBorderColor = Color(0x33FFFFFF),
-                focusedContainerColor = Color(0x0DFFFFFF),
-                unfocusedContainerColor = Color(0x0DFFFFFF),
-                cursorColor = Accent,
-            ),
-            shape = RoundedCornerShape(14.dp),
-            modifier = Modifier.fillMaxWidth(),
-        )
+        if (!collapsed) {
+            Spacer(Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0x0A000000))
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, _, zoom, _ ->
+                            termScale = (termScale * zoom).coerceIn(0.5f, 3f)
+                        }
+                    }
+                    .pointerInput(Unit) {
+                        detectTapGestures(onDoubleTap = { termScale = 1f })
+                    },
+            ) {
+                Text(
+                    display,
+                    color = TerminalText,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 10.sp * termScale,
+                    lineHeight = 13.sp * termScale,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(vScroll)
+                        .horizontalScroll(hScroll)
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(4.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0x55000000))
+                        .padding(horizontal = 4.dp),
+                ) {
+                    TermIconButton("−", color = Accent, size = 13f) {
+                        termScale = (termScale - 0.2f).coerceAtLeast(0.5f)
+                    }
+                    Text(
+                        "×" + "%.1f".format(termScale),
+                        color = TextDim,
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    TermIconButton("+", color = Accent, size = 13f) {
+                        termScale = (termScale + 0.2f).coerceAtMost(3f)
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = onInput,
+                    singleLine = true,
+                    placeholder = { Text("ввод…", color = TextDim, fontSize = 12.sp) },
+                    textStyle = TextStyle(
+                        color = TerminalText,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                    ),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { onSend() }),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Accent,
+                        unfocusedBorderColor = Color(0x33FFFFFF),
+                        focusedContainerColor = Color(0x0DFFFFFF),
+                        unfocusedContainerColor = Color(0x0DFFFFFF),
+                        cursorColor = Accent,
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    onClick = onSend,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Accent,
+                        contentColor = Color(0xFF0E1013),
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Text("▶", fontSize = 14.sp)
+                }
+            }
+        }
     }
 }
