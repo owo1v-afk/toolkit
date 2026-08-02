@@ -220,7 +220,7 @@ def _extract(blob, dest):
         shutil.rmtree(tmp)
     with zipfile.ZipFile(io.BytesIO(blob)) as z:
         for name in z.namelist():
-            if name.startswith(".") or ".dist-info" in name:
+            if name.startswith("."):
                 continue
             target = os.path.join(tmp, name)
             if name.endswith("/"):
@@ -245,7 +245,96 @@ def _extract(blob, dest):
         sys.path.insert(0, INSTALL_DIR)
 
 
-def _install(pkg, echo=True, version=None):
+def _version_tuple(v):
+    m = re.match(r"(\d+(?:\.\d+)*)", v)
+    if not m:
+        return None
+    return tuple(int(x) for x in m.group(1).split("."))
+
+
+def _parse_req(req):
+    parts = re.split(r";", req)
+    if "extra" in (parts[1] if len(parts) > 1 else ""):
+        return None
+    req = parts[0].strip()
+    req = re.sub(r"\[[^\]]*\]", "", req)
+    req_parts = [p.strip() for p in req.split(",")]
+    name = re.split(r"[<>=~!]", req_parts[0])[0].strip()
+    if not name:
+        return None
+    constraints = []
+    for p in req_parts[1:]:
+        m = re.match(r"(>=|<=|==|!=|>|<|~=)\s*(\S+)", p)
+        if not m:
+            continue
+        op, val = m.group(1), m.group(2)
+        if op == "~=":
+            vt = _version_tuple(val)
+            if vt:
+                constraints.append((">=", val))
+                if len(vt) == 1:
+                    constraints.append(("<", "%d" % (vt[0] + 1)))
+                else:
+                    constraints.append(("<", "%d.%d" % (vt[0], vt[1] + 1)))
+            continue
+        constraints.append((op, val))
+    return name, constraints
+
+
+def _satisfies(vt, constraints):
+    for op, val in constraints:
+        vt2 = _version_tuple(val)
+        if vt2 is None:
+            continue
+        if op == ">=" and not vt >= vt2:
+            return False
+        if op == ">" and not vt > vt2:
+            return False
+        if op == "<=" and not vt <= vt2:
+            return False
+        if op == "<" and not vt < vt2:
+            return False
+        if op == "==" and not vt == vt2:
+            return False
+        if op == "!=" and vt == vt2:
+            return False
+    return True
+
+
+def _deps_of(pkg):
+    try:
+        with _open(PYPY_JSON % pkg, 30) as r:
+            data = json.load(r)
+    except BaseException:
+        return []
+    deps = []
+    seen = set()
+    for req in data.get("info", {}).get("requires_dist") or []:
+        parsed = _parse_req(req)
+        if not parsed:
+            continue
+        name, constraints = parsed
+        if name in PLATFORM_STDLIB or name.startswith("_") or name == pkg or name in seen:
+            continue
+        seen.add(name)
+        try:
+            with _open(PYPY_JSON % name, 30) as r:
+                dep_data = json.load(r)
+        except BaseException:
+            continue
+        best = None
+        best_vt = None
+        for v in (dep_data.get("releases") or {}).keys():
+            vt = _version_tuple(v)
+            if vt is None or not _satisfies(vt, constraints):
+                continue
+            if best_vt is None or vt > best_vt:
+                best, best_vt = v, vt
+        deps.append((name, best))
+    return deps
+
+
+def _install(pkg, echo=True, version=None, _depth=0):
     pkg = PKG_ALIASES.get(pkg, pkg)
     if echo:
         TerminalIO.append("[автоустановка] скачиваю %s…\n" % pkg)
@@ -264,7 +353,18 @@ def _install(pkg, echo=True, version=None):
             return False
         blob = _download(url, pkg)
         _extract(blob, INSTALL_DIR)
-        _skip.discard(pkg)
+        if _depth < 4:
+            for dep, dep_version in _deps_of(pkg):
+                if dep in _skip or dep == pkg:
+                    continue
+                if dep in sys.modules:
+                    continue
+                if os.path.isdir(os.path.join(INSTALL_DIR, dep)) or os.path.isfile(
+                    os.path.join(INSTALL_DIR, dep + ".py")
+                ):
+                    continue
+                _skip.add(dep)
+                _install(dep, echo=echo, version=dep_version, _depth=_depth + 1)
         TerminalIO.progress(pkg, -1)
         if echo:
             TerminalIO.append("[автоустановка] %s установлен ✓\n" % pkg)
@@ -303,6 +403,17 @@ class AutoInstallFinder(object):
         except BaseException:
             return False
 
+    def _top_ok(self, topdir):
+        try:
+            if os.path.isfile(os.path.join(topdir, "__init__.py")):
+                return True
+            for entry in os.listdir(topdir):
+                if entry.endswith((".py", ".so")):
+                    return True
+        except OSError:
+            return False
+        return False
+
     def find_spec(self, fullname, path=None, target=None):
         if fullname in sys.modules:
             return None
@@ -316,8 +427,14 @@ class AutoInstallFinder(object):
         if top in PLATFORM_STDLIB or top.startswith("_"):
             return None
         pkg = PKG_ALIASES.get(top, top)
-        if pkg in _skip or os.path.isdir(os.path.join(INSTALL_DIR, pkg)):
+        if pkg in _skip:
             return None
+        topdir = os.path.join(INSTALL_DIR, pkg)
+        if os.path.isdir(topdir):
+            if self._top_ok(topdir):
+                return None
+            shutil.rmtree(topdir, ignore_errors=True)
+            _skip.discard(pkg)
         _skip.add(pkg)
         if not _install(pkg, echo=True):
             return None
