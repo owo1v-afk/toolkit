@@ -111,6 +111,44 @@ def _run_pip(arg):
     _install(arg, echo=True, version=version)
 
 
+def _wheel_score(filename):
+    if filename.endswith("-none-any.whl"):
+        return 0
+    m = re.search(r"-cp314-(?:cp314|abi3|none)-android_\d+_(arm64_v8a|x86_64)\.whl$", filename)
+    if not m:
+        return None
+    return 1 if m.group(1) == "arm64_v8a" else 2
+
+
+def _wheel_version(pkg, filename):
+    base = pkg.replace("-", "_").lower()
+    rest = filename[len(base) + 1:-4]
+    m = re.match(r"(\d+(?:\.\d+)*)", rest)
+    if not m:
+        return (0,)
+    return tuple(int(x) for x in m.group(1).split("."))
+
+
+def _pick_wheel(pkg, candidates):
+    best = None
+    best_key = None
+    for filename, url in candidates:
+        score = _wheel_score(filename)
+        if score is None:
+            continue
+        version = _wheel_version(pkg, filename)
+        if version is None:
+            continue
+        key = (version, score)
+        if (
+            best_key is None
+            or key[0] > best_key[0]
+            or (key[0] == best_key[0] and key[1] < best_key[1])
+        ):
+            best, best_key = url, key
+    return best
+
+
 def _pypi_json_wheel(pkg, version):
     if version is None:
         with _open(PYPY_JSON % pkg, 30) as r:
@@ -118,23 +156,25 @@ def _pypi_json_wheel(pkg, version):
         version = data["info"]["version"]
     with _open(PYPY_VERSION_JSON % (pkg, version), 30) as r:
         data = json.load(r)
-    for u in data["urls"]:
-        if u["filename"].endswith("-none-any.whl"):
-            return u["url"]
-    return None
+    return _pick_wheel(pkg, [(u["filename"], u["url"]) for u in data["urls"]])
 
 
 def _mirror_wheel(pkg, base, version):
     url = base % pkg
     with _open(url, 30) as r:
         html = r.read().decode("utf-8", "replace")
-    for m in re.finditer(r'href="([^"]+-none-any\.whl)"', html):
+    candidates = []
+    for m in re.finditer(r'href="([^"]+)"', html):
         href = m.group(1)
-        fname = href.rsplit("/", 1)[-1]
-        if version and not fname.startswith("%s-%s-" % (pkg, version)):
+        fname = href.split("#", 1)[0].rsplit("/", 1)[-1]
+        if not fname.endswith(".whl"):
             continue
-        return urllib.parse.urljoin(url, href)
-    return None
+        if version and not fname.startswith(
+            "%s-%s-" % (pkg.replace("-", "_").lower(), version)
+        ):
+            continue
+        candidates.append((fname, urllib.parse.urljoin(url, href.split("#", 1)[0])))
+    return _pick_wheel(pkg, candidates)
 
 
 def _wheel_url(pkg, version):
@@ -212,7 +252,11 @@ def _install(pkg, echo=True, version=None):
     try:
         url, errors = _wheel_url(pkg, version)
         if not url:
-            detail = "; ".join(errors) if errors else "источники недоступны"
+            if errors:
+                detail = "источники недоступны: " + "; ".join(errors)
+            else:
+                detail = ("у пакета нет колеса для Android: нужен чистый python "
+                          "или готовое колесо cp314-android (arm64)")
             TerminalIO.append(
                 "[автоустановка] %s: не нашлось подходящего колеса (%s)\n" % (pkg, detail)
             )
