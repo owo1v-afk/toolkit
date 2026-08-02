@@ -149,7 +149,7 @@ fun parseAnsi(raw: String): AnnotatedString = buildAnnotatedString {
                 withStyle(
                     SpanStyle(
                         color = fg ?: TerminalText,
-                        background = bg,
+                        background = bg ?: Color.Unspecified,
                         fontWeight = if (bold) FontWeight.Bold else null,
                         fontStyle = if (italic) FontStyle.Italic else null,
                         textDecoration = if (underline) TextDecoration.Underline else null,
