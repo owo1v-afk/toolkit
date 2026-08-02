@@ -1,6 +1,7 @@
 import sys
 import os
 import io
+import re
 import shutil
 import json
 import zipfile
@@ -23,7 +24,15 @@ PKG_ALIASES = {
     "Crypto": "pycryptodome",
     "serial": "pyserial",
     "socks": "pysocks",
+    "jwt": "pyjwt",
+    "flask": "flask",
 }
+
+PYPY_JSON = "https://pypi.org/pypi/%s/json"
+MIRRORS = [
+    "https://mirrors.aliyun.com/pypi/simple/%s/",
+    "https://mirrors.cloud.tencent.com/pypi/simple/%s/",
+]
 
 INSTALL_DIR = None
 _skip = set()
@@ -66,11 +75,11 @@ class Stream(object):
         pass
 
 
-def _pypi_wheel_url(pkg):
-    with urllib.request.urlopen("https://pypi.org/pypi/%s/json" % pkg, timeout=30) as r:
+def _pypi_json_wheel(pkg):
+    with urllib.request.urlopen(PYPY_JSON % pkg, timeout=30) as r:
         data = json.load(r)
     version = data["info"]["version"]
-    with urllib.request.urlopen("https://pypi.org/pypi/%s/%s/json" % (pkg, version), timeout=30) as r:
+    with urllib.request.urlopen(PYPY_JSON % (pkg, version), timeout=30) as r:
         data = json.load(r)
     for u in data["urls"]:
         if u["filename"].endswith("-none-any.whl"):
@@ -78,24 +87,70 @@ def _pypi_wheel_url(pkg):
     return None
 
 
+def _mirror_wheel(pkg, base):
+    url = base % pkg
+    with urllib.request.urlopen(url, timeout=30) as r:
+        html = r.read().decode("utf-8", "replace")
+    for m in re.finditer(r'href="([^"]+-none-any\.whl)"', html):
+        href = m.group(1)
+        if href.startswith("http"):
+            return href
+        return url.rstrip("/") + "/" + href
+    return None
+
+
+def _wheel_url(pkg):
+    try:
+        url = _pypi_json_wheel(pkg)
+        if url:
+            return url
+    except BaseException:
+        pass
+    for base in MIRRORS:
+        try:
+            url = _mirror_wheel(pkg, base)
+            if url:
+                return url
+        except BaseException:
+            continue
+    return None
+
+
+def _download(url, pkg):
+    req = urllib.request.Request(url, headers={"User-Agent": "toolkit-android/1.0"})
+    resp = urllib.request.urlopen(req, timeout=120)
+    total = resp.headers.get("Content-Length")
+    total = int(total) if total else 0
+    blob = b""
+    read = 0
+    while True:
+        chunk = resp.read(65536)
+        if not chunk:
+            break
+        blob += chunk
+        read += len(chunk)
+        if total:
+            TerminalIO.progress(pkg, max(0, min(100, int(read * 100 / total))))
+    return blob
+
+
 def _install(pkg, echo=True):
     pkg = PKG_ALIASES.get(pkg, pkg)
     if echo:
-        TerminalIO.append("[автоустановка] скачиваю %s с PyPI…\n" % pkg)
+        TerminalIO.append("[автоустановка] скачиваю %s…\n" % pkg)
     try:
-        url = _pypi_wheel_url(pkg)
+        url = _wheel_url(pkg)
         if not url:
             TerminalIO.append(
                 "[автоустановка] %s: универсального колеса нет (нативное расширение?)\n" % pkg
             )
+            TerminalIO.progress(pkg, -1)
             return False
+        blob = _download(url, pkg)
         dest = os.path.join(INSTALL_DIR, pkg)
         tmp = dest + ".tmp"
         if os.path.isdir(tmp):
             shutil.rmtree(tmp)
-        req = urllib.request.Request(url, headers={"User-Agent": "toolkit-android/1.0"})
-        with urllib.request.urlopen(req, timeout=90) as resp:
-            blob = resp.read()
         with zipfile.ZipFile(io.BytesIO(blob)) as z:
             for name in z.namelist():
                 if name.startswith(".") or ".dist-info" in name:
@@ -113,10 +168,12 @@ def _install(pkg, echo=True):
         _skip.discard(pkg)
         if INSTALL_DIR not in sys.path:
             sys.path.insert(0, INSTALL_DIR)
+        TerminalIO.progress(pkg, -1)
         if echo:
             TerminalIO.append("[автоустановка] %s установлен ✓\n" % pkg)
         return True
     except BaseException as e:
+        TerminalIO.progress(pkg, -1)
         if echo:
             TerminalIO.append("[автоустановка] %s: ошибка: %s\n" % (pkg, e))
         return False

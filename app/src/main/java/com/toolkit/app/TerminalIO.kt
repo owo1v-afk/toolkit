@@ -17,6 +17,14 @@ object TerminalIO {
     @Volatile
     var onFinished: (() -> Unit)? = null
 
+    @Volatile
+    var onProgress: ((String, Int) -> Unit)? = null
+
+    @JvmStatic
+    fun progress(pkg: String, percent: Int) {
+        main.post { onProgress?.invoke(pkg, percent) }
+    }
+
     @JvmStatic
     fun append(s: String) {
         val clean = ansi.matcher(s).replaceAll("").replace("\r", "")

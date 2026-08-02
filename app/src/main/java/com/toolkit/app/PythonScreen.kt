@@ -3,6 +3,8 @@ package com.toolkit.app
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -15,6 +17,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -41,6 +44,7 @@ import com.toolkit.app.ui.TextDim
 import com.toolkit.app.ui.TextMain
 import com.toolkit.app.ui.WarnOrange
 import java.io.File
+import kotlinx.coroutines.delay
 
 private val bundledDeps = mapOf(
     "requests" to "requests",
@@ -106,6 +110,7 @@ fun PythonScreen(onBack: () -> Unit) {
     var running by remember { mutableStateOf(false) }
     var startedOnce by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var progress by remember { mutableStateOf<Pair<String, Int>?>(null) }
     val outBuffer = remember { StringBuilder() }
 
     val picker = rememberLauncherForActivityResult(
@@ -152,6 +157,9 @@ fun PythonScreen(onBack: () -> Unit) {
         TerminalIO.onFinished = {
             running = false
             output = synchronized(outBuffer) { outBuffer.toString() }
+        }
+        TerminalIO.onProgress = { pkg, pct ->
+            progress = if (pct < 0) null else pkg to pct
         }
         PythonRunner.run(ctx, path) {}
     }
@@ -291,6 +299,40 @@ fun PythonScreen(onBack: () -> Unit) {
         }
 
         if (startedOnce) {
+            val dl = progress
+            if (dl != null) {
+                Spacer(Modifier.height(14.dp))
+                GlassCard(modifier = Modifier.fillMaxWidth(), radius = 18.dp) {
+                    Column(Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "скачиваю ${dl.first}",
+                                color = TextMain,
+                                fontSize = 14.sp,
+                            )
+                            Spacer(Modifier.weight(1f))
+                            Text(
+                                "${dl.second}%",
+                                color = Accent,
+                                fontSize = 15.sp,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        val pct by animateFloatAsState(
+                            targetValue = dl.second / 100f,
+                            animationSpec = tween(200),
+                            label = "dl",
+                        )
+                        LinearProgressIndicator(
+                            progress = { pct },
+                            color = Accent,
+                            trackColor = Color(0x22FFFFFF),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            }
             Spacer(Modifier.height(18.dp))
             TerminalView(output = output, input = input, onInput = { input = it }, onSend = {
                 val line = input
@@ -305,6 +347,13 @@ fun PythonScreen(onBack: () -> Unit) {
 @Composable
 fun TerminalView(output: String, input: String, onInput: (String) -> Unit, onSend: () -> Unit) {
     val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1400)
+            copied = false
+        }
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -320,8 +369,8 @@ fun TerminalView(output: String, input: String, onInput: (String) -> Unit, onSen
             )
             Spacer(Modifier.weight(1f))
             Text(
-                "⧉ копировать",
-                color = Accent,
+                if (copied) "✓ скопировано" else "⧉ копировать вывод",
+                color = if (copied) OkGreen else Accent,
                 fontSize = 12.sp,
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
@@ -330,6 +379,7 @@ fun TerminalView(output: String, input: String, onInput: (String) -> Unit, onSen
                         indication = null,
                     ) {
                         clipboard.setText(AnnotatedString(output))
+                        copied = true
                     },
             )
         }
