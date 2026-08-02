@@ -444,6 +444,11 @@ fun PythonScreen(onBack: () -> Unit) {
                 Spacer(Modifier.height(14.dp))
                 GlassCard(modifier = Modifier.fillMaxWidth(), radius = 18.dp) {
                     Column(Modifier.padding(16.dp)) {
+                        val pct by animateFloatAsState(
+                            targetValue = if (dl.second > 0) dl.second / 100f else 0f,
+                            animationSpec = tween(200),
+                            label = "dl",
+                        )
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 "скачиваю ${dl.first}",
@@ -451,11 +456,6 @@ fun PythonScreen(onBack: () -> Unit) {
                                 fontSize = 14.sp,
                             )
                             Spacer(Modifier.weight(1f))
-                            val pct by animateFloatAsState(
-                                targetValue = if (dl.second > 0) dl.second / 100f else 0f,
-                                animationSpec = tween(200),
-                                label = "dl",
-                            )
                             Text(
                                 if (dl.second > 0) "${(pct * 100).toInt()}%" else "…",
                                 color = Accent,
