@@ -19,6 +19,7 @@ object TerminalIO {
     var onProgress: ((String, Int) -> Unit)? = null
 
     @Volatile
+    @JvmField
     var cancelled = false
 
     @JvmStatic
