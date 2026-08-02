@@ -8,6 +8,7 @@ import zipfile
 import traceback
 import urllib.request
 import urllib.parse
+import urllib.error
 import importlib.util
 import importlib.machinery
 
@@ -32,6 +33,7 @@ PKG_ALIASES = {
 }
 
 PYPY_JSON = "https://pypi.org/pypi/%s/json"
+PYPY_VERSION_JSON = "https://pypi.org/pypi/%s/%s/json"
 MIRRORS = [
     "https://mirrors.aliyun.com/pypi/simple/%s/",
     "https://mirrors.cloud.tencent.com/pypi/simple/%s/",
@@ -39,8 +41,23 @@ MIRRORS = [
     "https://repo.huaweicloud.com/repository/pypi/simple/%s/",
 ]
 
+PLATFORM_STDLIB = {
+    "winreg", "_winapi", "msvcrt", "_msi", "winsound", "nt", "nturl2path",
+    "macpath", "EasyDialogs", "ic", "macostools", "clr", "_scproxy",
+    "pty", "termios", "fcntl", "pwd", "grp", "spwd", "crypt", "nis",
+    "readline", "curses", "tkinter", "turtle", "dbm", "tty", "select",
+}
+
 INSTALL_DIR = None
 _skip = set()
+
+
+def _open(url, timeout):
+    try:
+        return urllib.request.urlopen(url, timeout=timeout)
+    except urllib.error.HTTPError as e:
+        e.close()
+        raise
 
 
 class Stream(object):
@@ -56,7 +73,7 @@ class Stream(object):
         line = TerminalIO.readInput()
         stripped = line.strip()
         if stripped.startswith("pip install "):
-            _install(stripped.split()[2], echo=True)
+            _run_pip(stripped[12:].strip())
             return "\n"
         return line + "\n"
 
@@ -80,11 +97,22 @@ class Stream(object):
         pass
 
 
-def _pypi_json_wheel(pkg):
-    with urllib.request.urlopen(PYPY_JSON % pkg, timeout=30) as r:
-        data = json.load(r)
-    version = data["info"]["version"]
-    with urllib.request.urlopen(PYPY_JSON % (pkg, version), timeout=30) as r:
+def _run_pip(arg):
+    if arg.startswith(("http://", "https://")):
+        _install_url(arg)
+        return
+    version = None
+    if "==" in arg:
+        arg, version = arg.split("==", 1)
+    _install(arg, echo=True, version=version)
+
+
+def _pypi_json_wheel(pkg, version):
+    if version is None:
+        with _open(PYPY_JSON % pkg, 30) as r:
+            data = json.load(r)
+        version = data["info"]["version"]
+    with _open(PYPY_VERSION_JSON % (pkg, version), 30) as r:
         data = json.load(r)
     for u in data["urls"]:
         if u["filename"].endswith("-none-any.whl"):
@@ -92,36 +120,41 @@ def _pypi_json_wheel(pkg):
     return None
 
 
-def _mirror_wheel(pkg, base):
+def _mirror_wheel(pkg, base, version):
     url = base % pkg
-    with urllib.request.urlopen(url, timeout=30) as r:
+    with _open(url, 30) as r:
         html = r.read().decode("utf-8", "replace")
     for m in re.finditer(r'href="([^"]+-none-any\.whl)"', html):
-        return urllib.parse.urljoin(url, m.group(1))
+        href = m.group(1)
+        fname = href.rsplit("/", 1)[-1]
+        if version and not fname.startswith("%s-%s-" % (pkg, version)):
+            continue
+        return urllib.parse.urljoin(url, href)
     return None
 
 
-def _wheel_url(pkg):
-    err = None
+def _wheel_url(pkg, version):
+    errors = []
     try:
-        url = _pypi_json_wheel(pkg)
+        url = _pypi_json_wheel(pkg, version)
         if url:
-            return url, None
+            return url, errors
     except BaseException as e:
-        err = e
+        errors.append("pypi.org: %s" % e)
     for base in MIRRORS:
+        host = urllib.parse.urlparse(base).netloc
         try:
-            url = _mirror_wheel(pkg, base)
+            url = _mirror_wheel(pkg, base, version)
             if url:
-                return url, None
+                return url, errors
         except BaseException as e:
-            err = e
-    return None, err
+            errors.append("%s: %s" % (host, e))
+    return None, errors
 
 
 def _download(url, pkg):
     req = urllib.request.Request(url, headers={"User-Agent": "toolkit-android/1.0"})
-    with urllib.request.urlopen(req, timeout=120) as resp:
+    with _open(req, 120) as resp:
         total = resp.headers.get("Content-Length")
         total = int(total) if total else 0
         blob = b""
@@ -137,42 +170,44 @@ def _download(url, pkg):
     return blob
 
 
-def _install(pkg, echo=True):
+def _extract(blob, dest):
+    tmp = dest + ".tmp"
+    if os.path.isdir(tmp):
+        shutil.rmtree(tmp)
+    with zipfile.ZipFile(io.BytesIO(blob)) as z:
+        for name in z.namelist():
+            if name.startswith(".") or ".dist-info" in name:
+                continue
+            target = os.path.join(tmp, name)
+            if name.endswith("/"):
+                os.makedirs(target, exist_ok=True)
+                continue
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with z.open(name) as src, open(target, "wb") as dst:
+                dst.write(src.read())
+    if os.path.isdir(dest):
+        shutil.rmtree(dest)
+    os.replace(tmp, dest)
+    if INSTALL_DIR not in sys.path:
+        sys.path.insert(0, INSTALL_DIR)
+
+
+def _install(pkg, echo=True, version=None):
     pkg = PKG_ALIASES.get(pkg, pkg)
     if echo:
         TerminalIO.append("[автоустановка] скачиваю %s…\n" % pkg)
     try:
-        url, err = _wheel_url(pkg)
+        url, errors = _wheel_url(pkg, version)
         if not url:
-            detail = ("; " + str(err)) if err else ""
+            detail = "; ".join(errors) if errors else "источники недоступны"
             TerminalIO.append(
-                "[автоустановка] %s: колесо не найдено ни в одном источнике (pypi.org + 4 зеркала)%s\n"
-                % (pkg, detail)
+                "[автоустановка] %s: не нашлось подходящего колеса (%s)\n" % (pkg, detail)
             )
             TerminalIO.progress(pkg, -1)
             return False
         blob = _download(url, pkg)
-        dest = os.path.join(INSTALL_DIR, pkg)
-        tmp = dest + ".tmp"
-        if os.path.isdir(tmp):
-            shutil.rmtree(tmp)
-        with zipfile.ZipFile(io.BytesIO(blob)) as z:
-            for name in z.namelist():
-                if name.startswith(".") or ".dist-info" in name:
-                    continue
-                target = os.path.join(tmp, name)
-                if name.endswith("/"):
-                    os.makedirs(target, exist_ok=True)
-                    continue
-                os.makedirs(os.path.dirname(target), exist_ok=True)
-                with z.open(name) as src, open(target, "wb") as dst:
-                    dst.write(src.read())
-        if os.path.isdir(dest):
-            shutil.rmtree(dest)
-        os.replace(tmp, dest)
+        _extract(blob, os.path.join(INSTALL_DIR, pkg))
         _skip.discard(pkg)
-        if INSTALL_DIR not in sys.path:
-            sys.path.insert(0, INSTALL_DIR)
         TerminalIO.progress(pkg, -1)
         if echo:
             TerminalIO.append("[автоустановка] %s установлен ✓\n" % pkg)
@@ -182,6 +217,21 @@ def _install(pkg, echo=True):
         if echo:
             TerminalIO.append("[автоустановка] %s: ошибка: %s\n" % (pkg, e))
         return False
+
+
+def _install_url(url):
+    fname = urllib.parse.urlparse(url).path.rsplit("/", 1)[-1]
+    name = re.sub(r"-(\d.*)$", "", fname) or "pkg"
+    TerminalIO.append("[автоустановка] скачиваю %s по прямой ссылке…\n" % name)
+    try:
+        blob = _download(url, name)
+        _extract(blob, os.path.join(INSTALL_DIR, name))
+        _skip.discard(name)
+        TerminalIO.progress(name, -1)
+        TerminalIO.append("[автоустановка] %s установлен ✓\n" % name)
+    except BaseException as e:
+        TerminalIO.progress(name, -1)
+        TerminalIO.append("[автоустановка] %s: ошибка: %s\n" % (name, e))
 
 
 class AutoInstallFinder(object):
@@ -202,6 +252,8 @@ class AutoInstallFinder(object):
         if self._available(fullname):
             return None
         top = fullname.split(".")[0]
+        if top in PLATFORM_STDLIB or top.startswith("_"):
+            return None
         pkg = PKG_ALIASES.get(top, top)
         if pkg in _skip or os.path.isdir(os.path.join(INSTALL_DIR, pkg)):
             return None
