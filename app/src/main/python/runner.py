@@ -396,17 +396,21 @@ def _install_url(url):
         TerminalIO.append("[автоустановка] %s: ошибка: %s\n" % (name, e))
 
 
+_checking = False
+
+
 class AutoInstallFinder(object):
     def _available(self, fullname):
+        global _checking
+        if _checking:
+            return True
+        _checking = True
         try:
-            sys.meta_path.remove(self)
-            try:
-                spec = importlib.util.find_spec(fullname)
-            finally:
-                sys.meta_path.insert(0, self)
-            return spec is not None
+            return importlib.util.find_spec(fullname) is not None
         except BaseException:
             return False
+        finally:
+            _checking = False
 
     def _top_ok(self, topdir):
         try:

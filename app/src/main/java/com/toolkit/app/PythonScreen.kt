@@ -17,8 +17,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -292,11 +295,12 @@ fun PythonScreen(onBack: () -> Unit) {
             .padding(horizontal = 22.dp, vertical = 24.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "←",
-                color = Accent,
-                fontSize = 20.sp,
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Назад",
+                tint = Accent,
                 modifier = Modifier
+                    .size(22.dp)
                     .padding(end = 12.dp)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
@@ -313,14 +317,14 @@ fun PythonScreen(onBack: () -> Unit) {
         Spacer(Modifier.height(18.dp))
 
         GlassCard(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(18.dp)) {
+            Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                 Text(
                     "Загрузите ваш .py файл, он отобразится в окне СРАЗУ после загрузки, " +
                         "без лишних команд. Вы сможете писать, проще говоря у вас будет мини " +
                         "терминал прямо у нас, мы скачаем все нужные вашему софту зависимости :)",
                     color = TextDim,
-                    fontSize = 13.sp,
-                    lineHeight = 19.sp,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
                 )
             }
         }
@@ -643,7 +647,7 @@ fun TerminalView(
                     keyboardActions = KeyboardActions(onSend = { onSend() }),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Accent,
-                        unfocusedBorderColor = Color(0x33FFFFFF),
+                        unfocusedBorderColor = Color.Transparent,
                         focusedContainerColor = Color(0x0DFFFFFF),
                         unfocusedContainerColor = Color(0x0DFFFFFF),
                         cursorColor = Accent,

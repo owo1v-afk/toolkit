@@ -1,7 +1,6 @@
 package com.toolkit.app.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,8 +32,7 @@ fun GlassCard(
                         Color(0x0AFFFFFF),
                     )
                 )
-            )
-            .border(1.dp, Color(0x1FFFFFFF), shape),
+            ),
     ) {
         content()
     }
