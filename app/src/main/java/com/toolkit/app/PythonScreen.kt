@@ -114,6 +114,90 @@ private val ansiOther = Regex(
     "\u001B(?:\\[[0-9;?]*[A-Za-z]|\\][^\u0007]*(?:\u0007|\u001B\\\\)|" +
         "[()][0-9A-Za-z]|[=>]|[cEGKHPZ]|\\[[0-9]*[A-Z])"
 )
+private val escapeFull = Regex("\u001B\\[[0-9;?]*(?:[A-Za-z]|\u0007)")
+private val escapePartial = Regex("\u001B\\[[0-9;]*")
+
+fun processTerminal(raw: String): String {
+    if ('\r' !in raw && '\b' !in raw) return raw
+    val sb = StringBuilder(raw.length)
+    var pending = StringBuilder()
+    var afterCr = false
+    val nl = "\n"
+    var i = 0
+    val n = raw.length
+    fun flush() {
+        if (pending.isNotEmpty()) {
+            sb.append(pending)
+            pending = StringBuilder()
+        }
+    }
+    while (i < n) {
+        val c = raw[i]
+        if (c == '\u001B') {
+            val m = ansiSgr.find(raw, i)
+            if (m != null && m.range.first == i) {
+                pending.append(m.value)
+                i = m.range.last + 1
+                continue
+            }
+            val mo = ansiOther.find(raw, i)
+            if (mo != null && mo.range.first == i) {
+                pending.append(mo.value)
+                i = mo.range.last + 1
+                continue
+            }
+        }
+        when (c) {
+            '\r' -> {
+                flush()
+                afterCr = true
+            }
+            '\n' -> {
+                afterCr = false
+                flush()
+                sb.append('\n')
+            }
+            '\b' -> {
+                if (afterCr) {
+                    val lastNl = sb.lastIndexOf(nl)
+                    if (lastNl == -1) sb.setLength(0) else sb.setLength(lastNl + 1)
+                    afterCr = false
+                }
+                flush()
+                var e = sb.length
+                while (e > 0) {
+                    val ts = sb.lastIndexOf("\u001B", e - 1)
+                    if (ts != -1 && sb.substring(ts, e).matches(escapeFull)) {
+                        e = ts
+                    } else {
+                        break
+                    }
+                }
+                if (e > 0 && sb[e - 1] != '\n') {
+                    sb.delete(e - 1, e)
+                    if (e - 1 > 0) {
+                        val ts = sb.lastIndexOf("\u001B")
+                        if (ts != -1 && sb.substring(ts).matches(escapePartial)) {
+                            sb.setLength(ts)
+                        }
+                    }
+                }
+            }
+            else -> {
+                if (afterCr) {
+                    val lastNl = sb.lastIndexOf(nl)
+                    if (lastNl == -1) sb.setLength(0) else sb.setLength(lastNl + 1)
+                    afterCr = false
+                }
+                flush()
+                sb.append(c)
+            }
+        }
+        i++
+    }
+    flush()
+    return sb.toString()
+}
 
 private val ansi16 = listOf(
     Color(0xFF1B1D20), Color(0xFFE06C75), Color(0xFF98C379), Color(0xFFE5C07B),
@@ -537,7 +621,7 @@ fun TerminalView(
     var follow by remember { mutableStateOf(true) }
     val vScroll = rememberScrollState()
     val hScroll = rememberScrollState()
-    val display = remember(output) { parseAnsi(output) }
+    val display = remember(output) { parseAnsi(processTerminal(output)) }
 
     LaunchedEffect(output, follow) {
         if (follow) vScroll.scrollTo(vScroll.maxValue)

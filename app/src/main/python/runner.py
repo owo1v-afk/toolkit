@@ -4,6 +4,7 @@ import io
 import re
 import shutil
 import json
+import warnings
 import zipfile
 import traceback
 import urllib.request
@@ -463,6 +464,7 @@ def run(path, args_str=""):
         sys.meta_path.insert(0, AutoInstallFinder())
     _skip = set()
     TerminalIO.reset()
+    warnings.simplefilter("ignore", ResourceWarning)
     sys.stdin = Stream()
     sys.stdout = Stream()
     sys.stderr = Stream()
