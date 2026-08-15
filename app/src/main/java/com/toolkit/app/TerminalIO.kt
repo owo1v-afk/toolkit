@@ -28,6 +28,11 @@ object TerminalIO {
     }
 
     @JvmStatic
+    fun clearInput() {
+        inputQueue.clear()
+    }
+
+    @JvmStatic
     fun cancel() {
         cancelled = true
         inputQueue.offer("")

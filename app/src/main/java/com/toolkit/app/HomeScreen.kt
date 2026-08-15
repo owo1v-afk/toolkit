@@ -20,7 +20,7 @@ import com.toolkit.app.ui.TextDim
 import com.toolkit.app.ui.TextMain
 
 @Composable
-fun HomeScreen(onOpenPython: () -> Unit, onOpenStresser: () -> Unit) {
+fun HomeScreen(onOpenPython: () -> Unit, onOpenStresser: () -> Unit, onOpenBomber: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -97,46 +97,91 @@ fun HomeScreen(onOpenPython: () -> Unit, onOpenStresser: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
 
-        GlassCard(
-            modifier = Modifier
-                .width(170.dp)
-                .height(180.dp)
-                .clickable(onClick = onOpenStresser),
-        ) {
-            Column(
+        Row(Modifier.fillMaxWidth()) {
+            GlassCard(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(14.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+                    .weight(1f)
+                    .height(180.dp)
+                    .clickable(onClick = onOpenStresser),
             ) {
-                WifiIcon(
+                Column(
                     modifier = Modifier
-                        .padding(top = 8.dp)
-                        .size(40.dp),
-                    color = Accent,
-                )
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "Wi-Fi Stresser",
-                    color = TextMain,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(Modifier.height(5.dp))
-                Text(
-                    "стресс-тест сети\nпинг · скорости · график",
-                    color = TextDim,
-                    fontSize = 11.sp,
-                    lineHeight = 15.sp,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.weight(1f))
-                Text(
-                    "Открыть →",
-                    color = Accent,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                )
+                        .fillMaxSize()
+                        .padding(14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    WifiIcon(
+                        modifier = Modifier
+                            .padding(top = 8.dp)
+                            .size(40.dp),
+                        color = Accent,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Wi-Fi Stresser",
+                        color = TextMain,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.height(5.dp))
+                    Text(
+                        "стресс-тест сети\nпинг · скорости · график",
+                        color = TextDim,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "Открыть →",
+                        color = Accent,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            GlassCard(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(180.dp)
+                    .clickable(onClick = onOpenBomber),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    BombIcon(
+                        modifier = Modifier
+                            .padding(top = 8.dp)
+                            .size(40.dp),
+                        color = BombRed,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "SMS Bomber",
+                        color = TextMain,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.height(5.dp))
+                    Text(
+                        "смс-бомбер\nномер · прокси · логи",
+                        color = TextDim,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "Открыть →",
+                        color = Accent,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
             }
         }
     }

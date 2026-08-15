@@ -27,6 +27,10 @@ object PythonRunner {
     }
 
     fun run(context: Context, scriptPath: String) {
+        runWithArgs(context, scriptPath, emptyList())
+    }
+
+    fun runWithArgs(context: Context, scriptPath: String, args: List<String>) {
         if (running) {
             TerminalIO.append("Скрипт уже выполняется. Нажмите Стоп или дождитесь завершения.\n")
             return
@@ -36,7 +40,7 @@ object PythonRunner {
         Thread({
             try {
                 val py = Python.getInstance()
-                py.getModule("runner").callAttr("run", scriptPath, "")
+                py.getModule("runner").callAttr("run", scriptPath, args.joinToString("\0"))
             } catch (t: Throwable) {
                 TerminalIO.append("Ошибка запуска: ${t.message}\n")
             } finally {

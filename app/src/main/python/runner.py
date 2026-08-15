@@ -474,6 +474,10 @@ def run(path, args_str=""):
         TerminalIO.finished()
         return
     try:
+        os.chdir(os.path.dirname(path) or os.getcwd())
+    except BaseException:
+        pass
+    try:
         with open(path, "rb") as f:
             code = compile(f.read(), path, "exec")
         exec(code, {"__name__": "__main__", "__file__": path, "__builtins__": __builtins__})

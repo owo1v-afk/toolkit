@@ -40,9 +40,11 @@ class MainActivity : ComponentActivity() {
                         "home" -> HomeScreen(
                             onOpenPython = { screen = "python" },
                             onOpenStresser = { screen = "stresser" },
+                            onOpenBomber = { screen = "bomber" },
                         )
                         "python" -> PythonScreen(onBack = { screen = "home" })
                         "stresser" -> WifiStresserScreen(onBack = { screen = "home" })
+                        "bomber" -> BomberScreen(onBack = { screen = "home" })
                     }
                 }
             }
