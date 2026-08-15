@@ -454,7 +454,7 @@ class AutoInstallFinder(object):
             return None
 
 
-def run(path, args_str=""):
+def _prepare(cwd, name, args_str=""):
     global INSTALL_DIR, _skip
     INSTALL_DIR = os.path.join(os.environ.get("HOME", "/data/data/com.toolkit.app/files"), "pymods")
     os.makedirs(INSTALL_DIR, exist_ok=True)
@@ -466,19 +466,38 @@ def run(path, args_str=""):
     sys.stdin = Stream()
     sys.stdout = Stream()
     sys.stderr = Stream()
-    sys.argv = [path] + ([a for a in args_str.split("\0") if a] if args_str else [])
+    sys.argv = [name] + ([a for a in args_str.split("\0") if a] if args_str else [])
+    if cwd:
+        try:
+            os.chdir(cwd)
+        except BaseException:
+            pass
+
+
+def run(path, args_str=""):
+    _prepare(os.path.dirname(path) or os.getcwd(), path, args_str)
     if not os.path.isfile(path):
         TerminalIO.append("[ошибка] файл не найден: %s\n" % path)
         TerminalIO.finished()
         return
     try:
-        os.chdir(os.path.dirname(path) or os.getcwd())
-    except BaseException:
-        pass
-    try:
         with open(path, "rb") as f:
             code = compile(f.read(), path, "exec")
         exec(code, {"__name__": "__main__", "__file__": path, "__builtins__": __builtins__})
+    except SystemExit:
+        pass
+    except BaseException:
+        traceback.print_exc()
+    finally:
+        TerminalIO.append("\n[процесс завершен]\n")
+        TerminalIO.finished()
+
+
+def run_source(source, cwd="", args_str=""):
+    _prepare(cwd or None, "<bundled>", args_str)
+    try:
+        code = compile(source, "<bundled>", "exec")
+        exec(code, {"__name__": "__main__", "__file__": "<bundled>", "__builtins__": __builtins__})
     except SystemExit:
         pass
     except BaseException:

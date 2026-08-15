@@ -133,8 +133,7 @@ fun BomberScreen(onBack: () -> Unit) {
             return
         }
         if (PythonRunner.running) return
-        val scriptPath = PythonRunner.bundledScript(ctx)
-        val scriptsDir = File(scriptPath).parentFile
+        val scriptsDir = File(ctx.filesDir, "scripts").apply { mkdirs() }
         if (proxy.isNotBlank()) {
             val pr = proxy.trim()
             runCatching {
@@ -194,7 +193,7 @@ fun BomberScreen(onBack: () -> Unit) {
         TerminalIO.submit(if (proxy.isBlank()) "n" else "y")
         TerminalIO.submit("")
         TerminalIO.submit("")
-        PythonRunner.runWithArgs(ctx, scriptPath, emptyList())
+        PythonRunner.runBundled(ctx, PythonRunner.bundledSource(ctx), scriptsDir.absolutePath)
     }
 
     Column(
