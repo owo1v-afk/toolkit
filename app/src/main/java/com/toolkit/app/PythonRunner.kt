@@ -3,6 +3,7 @@ package com.toolkit.app
 import android.content.Context
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
+import java.io.File
 
 object PythonRunner {
 
@@ -24,6 +25,20 @@ object PythonRunner {
 
     fun start(context: Context) {
         ensureStarted(context)
+        bundledScript(context)
+    }
+
+    fun bundledScript(context: Context): String {
+        val dir = File(context.filesDir, "scripts").apply { mkdirs() }
+        val dest = File(dir, "betasms.py")
+        if (!dest.exists()) {
+            runCatching {
+                context.assets.open("python/betasms.py").use { src ->
+                    dest.outputStream().use { src.copyTo(it) }
+                }
+            }
+        }
+        return dest.absolutePath
     }
 
     fun run(context: Context, scriptPath: String) {

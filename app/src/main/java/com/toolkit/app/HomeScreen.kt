@@ -157,18 +157,18 @@ fun HomeScreen(onOpenPython: () -> Unit, onOpenStresser: () -> Unit, onOpenBombe
                         modifier = Modifier
                             .padding(top = 8.dp)
                             .size(40.dp),
-                        color = BombRed,
+                        color = Accent,
                     )
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        "SMS Bomber",
+                        "Phone Bomber",
                         color = TextMain,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Spacer(Modifier.height(5.dp))
                     Text(
-                        "смс-бомбер\nномер · прокси · логи",
+                        "телефонный бомбер\nномер · прокси · логи",
                         color = TextDim,
                         fontSize = 11.sp,
                         lineHeight = 15.sp,

@@ -1,14 +1,6 @@
 package com.toolkit.app
 
-import android.Manifest
-import android.content.Intent
-import android.net.Uri
-import android.os.Build
-import android.os.Environment
-import android.provider.Settings
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -65,12 +57,7 @@ import java.util.*
 
 val BombRed = Color(0xFFFF6B6B)
 
-private val BomberPath = "/storage/emulated/0/Download/Telegram/betasms.py"
-
-private fun checkBomberPath(): Boolean {
-    if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) return false
-    return File(BomberPath).isFile
-}
+private val ansiStrip = Regex("\u001B\\[[0-9;]*[A-Za-z]")
 
 @Composable
 fun BombIcon(modifier: Modifier, color: Color, animated: Boolean = false) {
@@ -117,24 +104,16 @@ fun BomberScreen(onBack: () -> Unit) {
     var number by remember { mutableStateOf("") }
     var proxy by remember { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
-    var pathOk by remember { mutableStateOf(checkBomberPath()) }
     val logs = remember { mutableStateListOf<BomberLogLine>() }
     val listState = rememberLazyListState()
     val outBuffer = remember { StringBuilder() }
-
-    val grantLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { pathOk = checkBomberPath() }
-    val readPermLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { pathOk = checkBomberPath() }
 
     BackHandler(enabled = true, onBack = onBack)
 
     fun addLog(text: String, color: Color = TextDim) {
         val ts = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         logs.add(BomberLogLine("[$ts] $text", color))
-        if (logs.size > 120) logs.removeAt(0)
+        if (logs.size > 150) logs.removeAt(0)
     }
 
     LaunchedEffect(logs.size) {
@@ -153,11 +132,19 @@ fun BomberScreen(onBack: () -> Unit) {
             addLog("Введите номер телефона", WarnOrange)
             return
         }
-        if (!pathOk) {
-            addLog("betasms.py недоступен — нужен доступ к файлам", WarnOrange)
-            return
-        }
         if (PythonRunner.running) return
+        val scriptPath = PythonRunner.bundledScript(ctx)
+        val scriptsDir = File(scriptPath).parentFile
+        if (proxy.isNotBlank()) {
+            val pr = proxy.trim()
+            runCatching {
+                File(scriptsDir, "proxy.txt").writeText("$pr\n")
+            }
+            addLog("Прокси: $pr", AccentSoft)
+        } else {
+            runCatching { File(scriptsDir, "proxy.txt").delete() }
+            addLog("Прокси не задан — работаем с текущего IP", TextDim)
+        }
         logs.clear()
         outBuffer.clear()
         running = true
@@ -169,19 +156,20 @@ fun BomberScreen(onBack: () -> Unit) {
                 val lines = text.split("\n")
                 if (lines.size > 1) {
                     for (i in 0 until lines.size - 1) {
-                        val line = processTerminal(lines[i]).trimEnd('\r')
+                        val line = ansiStrip.replace(processTerminal(lines[i]).trimEnd('\r'), "")
                         if (line.isNotBlank()) {
                             val color = when {
-                                line.contains("успешно") || line.contains("отправлено") ||
-                                    line.contains("✓") || line.contains("готов") ||
-                                    line.contains("sent") -> OkGreen
+                                line.contains("успеш") || line.contains("отправлено") ||
+                                    line.contains("sent") || line.contains("✓") ||
+                                    line.contains("Успех") -> OkGreen
                                 line.contains("ошибк") || line.contains("fail") ||
-                                    line.contains("✗") || line.contains("не найден") -> BombRed
-                                line.startsWith("[") -> Accent
+                                    line.contains("Ошиб") || line.contains("✗") -> BombRed
+                                line.contains("ЗАПУСК") || line.contains("СТАТИСТИКА") ||
+                                    line.contains("Прокси:") || line.contains("эндпоинт") -> Accent
                                 else -> TextDim
                             }
                             logs.add(BomberLogLine(line, color))
-                            if (logs.size > 120) logs.removeAt(0)
+                            if (logs.size > 150) logs.removeAt(0)
                         }
                     }
                     outBuffer.clear()
@@ -191,37 +179,22 @@ fun BomberScreen(onBack: () -> Unit) {
         }
         TerminalIO.onFinished = {
             running = false
-            val rest = synchronized(outBuffer) { outBuffer.toString().trimEnd('\n', '\r') }
+            val rest = ansiStrip.replace(
+                synchronized(outBuffer) { outBuffer.toString().trimEnd('\n', '\r') },
+                "",
+            )
             if (rest.isNotBlank()) logs.add(BomberLogLine(rest, TextDim))
             outBuffer.clear()
         }
         TerminalIO.onProgress = null
-        addLog("Запуск betasms.py → $BomberPath", Accent)
-        addLog(
-            if (proxy.isBlank()) "Прокси не задан — работаем с текущего IP"
-            else "Прокси: ${proxy.trim()}",
-            TextDim,
-        )
+        addLog("Запуск бомбера (встроен в приложение)", Accent)
+        addLog("Номер: $n", TextDim)
         TerminalIO.clearInput()
         TerminalIO.submit(n)
-        if (proxy.isNotBlank()) TerminalIO.submit(proxy.trim())
-        PythonRunner.runWithArgs(ctx, BomberPath, listOf(n, proxy.trim()))
-    }
-
-    fun requestStorage() {
-        if (Build.VERSION.SDK_INT >= 30) {
-            val intent = runCatching {
-                Intent(
-                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                    Uri.parse("package:${ctx.packageName}"),
-                )
-            }.getOrElse {
-                Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-            }
-            runCatching { grantLauncher.launch(intent) }
-        } else {
-            readPermLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
-        }
+        TerminalIO.submit(if (proxy.isBlank()) "n" else "y")
+        TerminalIO.submit("")
+        TerminalIO.submit("")
+        PythonRunner.runWithArgs(ctx, scriptPath, emptyList())
     }
 
     Column(
@@ -247,7 +220,7 @@ fun BomberScreen(onBack: () -> Unit) {
             }
             Spacer(Modifier.width(6.dp))
             Text(
-                "SMS Bomber",
+                "Phone Bomber",
                 color = TextMain,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
@@ -255,7 +228,7 @@ fun BomberScreen(onBack: () -> Unit) {
             Spacer(Modifier.weight(1f))
             BombIcon(
                 modifier = Modifier.size(30.dp),
-                color = BombRed,
+                color = Accent,
                 animated = running,
             )
         }
@@ -264,53 +237,19 @@ fun BomberScreen(onBack: () -> Unit) {
         GlassCard(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
                 Text(
-                    "Запускает betasms.py из вашего хранилища: $BomberPath. " +
-                        "Введите номер и, при желании, прокси (ip:port). Без прокси бомбер работает с текущего IP.",
+                    "Телефонный бомбер (заказы обратных звонков, 540+ сервисов). " +
+                        "Введите номер и, при желании, прокси (ip:port). Без прокси работает с текущего IP.",
                     color = TextDim,
                     fontSize = 13.sp,
                     lineHeight = 18.sp,
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    if (pathOk) "● betasms.py найден" else "● betasms.py недоступен",
-                    color = if (pathOk) OkGreen else BombRed,
+                    "● betasms.py встроен в приложение",
+                    color = OkGreen,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
-            }
-        }
-
-        if (!pathOk) {
-            Spacer(Modifier.height(12.dp))
-            GlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(14.dp)) {
-                    Text(
-                        if (Build.VERSION.SDK_INT >= 30) {
-                            "Приложению нужен доступ «Все файлы», чтобы прочитать betasms.py. " +
-                                "Откройте настройки и включите его, затем вернитесь."
-                        } else {
-                            "Приложению нужен доступ к хранилищу, чтобы прочитать betasms.py."
-                        },
-                        color = TextDim,
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp,
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Button(
-                        onClick = { requestStorage() },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Accent,
-                            contentColor = Color(0xFF0E1013),
-                        ),
-                        shape = RoundedCornerShape(14.dp),
-                    ) {
-                        Text(
-                            "Разрешить доступ",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                }
             }
         }
 
@@ -372,12 +311,9 @@ fun BomberScreen(onBack: () -> Unit) {
                 Spacer(Modifier.height(12.dp))
                 Button(
                     onClick = { if (running) stopBomber() else startBomber() },
-                    enabled = pathOk,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (running) Color(0xFFB3261E) else Accent,
                         contentColor = if (running) Color.White else Color(0xFF0E1013),
-                        disabledContainerColor = Color(0x22FFFFFF),
-                        disabledContentColor = TextDim,
                     ),
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier

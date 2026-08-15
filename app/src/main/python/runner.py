@@ -115,7 +115,7 @@ def _run_pip(arg):
 def _wheel_score(filename):
     if filename.endswith("-none-any.whl"):
         return 0
-    m = re.search(r"-cp314-(?:cp314|abi3|none)-android_\d+_(arm64_v8a|x86_64)\.whl$", filename)
+    m = re.search(r"-cp31[0-9]-(?:cp31[0-9]|abi3|none)-android_\d+_(arm64_v8a|x86_64)\.whl$", filename)
     if not m:
         return None
     return 1 if m.group(1) == "arm64_v8a" else 2

@@ -51,13 +51,14 @@ android {
 
 chaquopy {
     defaultConfig {
-        version = "3.14"
+        version = "3.13"
         buildPython("python3")
         pip {
             install("requests")
             install("colorama")
             install("beautifulsoup4")
             install("httpx")
+            install("aiohttp")
         }
     }
 }
