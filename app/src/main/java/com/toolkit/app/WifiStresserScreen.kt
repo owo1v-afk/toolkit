@@ -39,7 +39,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.quadraticTo
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.AnnotatedString
@@ -720,7 +719,7 @@ private fun LatencyGraph(history: List<Float>?) {
                 for (i in 1 until goodPts.size - 1) {
                     val midX = (goodPts[i].x + goodPts[i + 1].x) / 2f
                     val midY = (goodPts[i].y + goodPts[i + 1].y) / 2f
-                    line.quadraticTo(goodPts[i].x, goodPts[i].y, midX, midY)
+                    line.quadraticBezierTo(goodPts[i].x, goodPts[i].y, midX, midY)
                 }
                 line.lineTo(goodPts.last().x, goodPts.last().y)
             }
@@ -731,7 +730,7 @@ private fun LatencyGraph(history: List<Float>?) {
                 for (i in 1 until goodPts.size - 1) {
                     val midX = (goodPts[i].x + goodPts[i + 1].x) / 2f
                     val midY = (goodPts[i].y + goodPts[i + 1].y) / 2f
-                    area.quadraticTo(goodPts[i].x, goodPts[i].y, midX, midY)
+                    area.quadraticBezierTo(goodPts[i].x, goodPts[i].y, midX, midY)
                 }
                 area.lineTo(goodPts.last().x, goodPts.last().y)
             } else {
