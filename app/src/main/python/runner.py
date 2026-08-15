@@ -460,8 +460,6 @@ def run(path, args_str=""):
     os.makedirs(INSTALL_DIR, exist_ok=True)
     if INSTALL_DIR not in sys.path:
         sys.path.insert(0, INSTALL_DIR)
-    if not any(isinstance(f, AutoInstallFinder) for f in sys.meta_path):
-        sys.meta_path.insert(0, AutoInstallFinder())
     _skip = set()
     TerminalIO.reset()
     warnings.simplefilter("ignore", ResourceWarning)

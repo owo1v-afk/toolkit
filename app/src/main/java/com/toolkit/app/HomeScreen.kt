@@ -70,7 +70,7 @@ fun HomeScreen(onOpenPython: () -> Unit, onOpenStresser: () -> Unit, onOpenBombe
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            "мини-терминал · пакеты ставятся автоматически",
+                            "мини-терминал · всё встроено",
                             color = TextDim,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(top = 2.dp),
@@ -79,8 +79,8 @@ fun HomeScreen(onOpenPython: () -> Unit, onOpenStresser: () -> Unit, onOpenBombe
                 }
                 Spacer(Modifier.height(14.dp))
                 Text(
-                    "Всё уже встроено в приложение — пакеты ставятся автоматически, " +
-                        "запуск в один тап. Внутри можно писать: полноценный мини-терминал.",
+                    "Всё уже встроено в приложение — запуск в один тап. " +
+                        "Внутри можно писать: полноценный мини-терминал.",
                     color = TextDim,
                     fontSize = 13.sp,
                     lineHeight = 18.sp,
@@ -184,5 +184,19 @@ fun HomeScreen(onOpenPython: () -> Unit, onOpenStresser: () -> Unit, onOpenBombe
                 }
             }
         }
+
+        Spacer(Modifier.height(44.dp))
+        Text(
+            "ТГК: t.me/toolkitw",
+            color = Accent,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            "Регулярные обновления",
+            color = TextDim,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(top = 3.dp),
+        )
     }
 }
