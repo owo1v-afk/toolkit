@@ -297,7 +297,7 @@ fun BomberScreen(onBack: () -> Unit) {
                     )
                     Spacer(Modifier.height(10.dp))
                     Button(
-                        onClick = requestStorage,
+                        onClick = { requestStorage() },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Accent,
                             contentColor = Color(0xFF0E1013),

@@ -40,7 +40,7 @@ object PythonRunner {
         Thread({
             try {
                 val py = Python.getInstance()
-                py.getModule("runner").callAttr("run", scriptPath, args.joinToString("\0"))
+                py.getModule("runner").callAttr("run", scriptPath, args.joinToString("\u0000"))
             } catch (t: Throwable) {
                 TerminalIO.append("Ошибка запуска: ${t.message}\n")
             } finally {
