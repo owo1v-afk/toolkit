@@ -244,12 +244,6 @@ fun BomberScreen(onBack: () -> Unit) {
                     lineHeight = 18.sp,
                 )
                 Spacer(Modifier.height(8.dp))
-                Text(
-                    "● встроен в приложение, готов к запуску",
-                    color = OkGreen,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
             }
         }
 
