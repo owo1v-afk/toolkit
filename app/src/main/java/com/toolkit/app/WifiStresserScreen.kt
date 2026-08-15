@@ -1,5 +1,7 @@
 package com.toolkit.app
 
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -115,12 +117,12 @@ class StresserEngine(
             }
             workers.add(t)
         }
-        for (i in 0 until 8) go { churnWorker() }
-        for (i in 0 until 4) go { keepAliveWorker() }
-        for (i in 0 until 6) go { udpWorker(53) }
-        for (i in 0 until 6) go { udpWorker(67) }
-        for (i in 0 until 12) go { rstWorker() }
-        for (i in 0 until 3) go { downloadWorker() }
+        for (i in 0 until 20) go { churnWorker() }
+        for (i in 0 until 8) go { keepAliveWorker() }
+        for (i in 0 until 10) go { udpWorker(53) }
+        for (i in 0 until 10) go { udpWorker(67) }
+        for (i in 0 until 24) go { rstWorker() }
+        for (i in 0 until 8) go { downloadWorker() }
         go { pingLoop() }
         go { snapshotLoop() }
     }
@@ -138,6 +140,12 @@ class StresserEngine(
     }
 
     private fun tcpConnect(): Socket? {
+        synchronized(pool) {
+            if (pool.size >= 250) {
+                Thread.sleep(50)
+                return null
+            }
+        }
         return try {
             val s = Socket()
             s.tcpNoDelay = true
@@ -223,15 +231,13 @@ class StresserEngine(
 
     private fun udpWorker(port: Int) {
         val s = DatagramSocket()
-        val p = ByteArray(1200)
+        val p = ByteArray(1400)
         Random().nextBytes(p)
         while (running.get()) {
             try {
-                val packet = DatagramPacket(p, p.size, InetSocketAddress(host, port))
-                s.send(packet)
+                s.send(DatagramPacket(p, p.size, InetSocketAddress(host, port)))
                 sent.addAndGet(p.size.toLong())
             } catch (t: Throwable) {
-                failCount.incrementAndGet()
             }
         }
         runCatching { s.close() }
@@ -310,7 +316,7 @@ class StresserEngine(
                 }
                 if (history.size > 90) history.removeAt(0)
             }
-            Thread.sleep(1200)
+            Thread.sleep(1000)
         }
     }
 
@@ -410,22 +416,27 @@ fun WifiStresserScreen(onBack: () -> Unit) {
         logs.clear()
         wasDropped.value = false
         pingSpiked.value = false
+        val ui = Handler(Looper.getMainLooper())
         val e = StresserEngine(
             host = h,
             onMetrics = { m ->
-                snap = m
-                if (!m.dropped) wasDropped.value = false
-                if (m.pingMs > 1000 && !pingSpiked.value) {
-                    pingSpiked.value = true
-                    addLog("Пинг подскочил: ${m.pingMs.toInt()} мс", WarnOrange)
-                } else if (m.pingMs < 400 && pingSpiked.value) {
-                    pingSpiked.value = false
+                ui.post {
+                    snap = m
+                    if (!m.dropped) wasDropped.value = false
+                    if (m.pingMs > 1000 && !pingSpiked.value) {
+                        pingSpiked.value = true
+                        addLog("Пинг подскочил: ${m.pingMs.toInt()} мс", WarnOrange)
+                    } else if (m.pingMs < 400 && pingSpiked.value) {
+                        pingSpiked.value = false
+                    }
                 }
             },
-            onLog = { text, color -> addLog(text, color) },
+            onLog = { text, color -> ui.post { addLog(text, color) } },
             onDrop = {
-                wasDropped.value = true
-                addLog("Интернет упал! Нет ответа от роутера", Color(0xFFFF6B6B))
+                ui.post {
+                    wasDropped.value = true
+                    addLog("Интернет упал! Нет ответа от роутера", Color(0xFFFF6B6B))
+                }
             },
         )
         engine.value = e
@@ -647,7 +658,7 @@ private fun StatTile(modifier: Modifier, label: String, value: String) {
 }
 
 private fun speedStr(kbs: Float): String {
-    if (kbs <= 0f) return "—"
+    if (kbs <= 0f) return "0 КБ/с"
     if (kbs >= 1024f) return "%.1f МБ/с".format(Locale.US, kbs / 1024f)
     return "${kbs.toInt()} КБ/с"
 }
@@ -672,7 +683,7 @@ private fun LatencyGraph(history: List<Float>?) {
         val from = max(0, n - 60)
         val data = pts.subList(from, n)
         val goodMax = data.filter { it >= 0 }.maxOrNull()
-        val maxV = max(250f, goodMax ?: 250f) * 1.15f
+        val maxV = max(50f, goodMax ?: 50f) * 1.15f
         fun xAt(i: Int) = w * (from + i) / 59f
         fun yAt(v: Float) = h - (min(v, maxV) / maxV) * h
 
