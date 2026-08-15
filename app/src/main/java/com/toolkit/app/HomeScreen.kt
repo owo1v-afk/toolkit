@@ -99,42 +99,42 @@ fun HomeScreen(onOpenPython: () -> Unit, onOpenStresser: () -> Unit) {
 
         GlassCard(
             modifier = Modifier
-                .width(150.dp)
-                .height(158.dp)
+                .width(170.dp)
+                .height(180.dp)
                 .clickable(onClick = onOpenStresser),
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(12.dp),
+                    .padding(14.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 WifiIcon(
                     modifier = Modifier
-                        .padding(top = 6.dp)
-                        .size(36.dp),
+                        .padding(top = 8.dp)
+                        .size(40.dp),
                     color = Accent,
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
                 Text(
                     "Wi-Fi Stresser",
                     color = TextMain,
-                    fontSize = 14.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(5.dp))
                 Text(
                     "стресс-тест сети\nпинг · скорости · график",
                     color = TextDim,
-                    fontSize = 10.5.sp,
-                    lineHeight = 14.sp,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
                     textAlign = TextAlign.Center,
                 )
                 Spacer(Modifier.weight(1f))
                 Text(
                     "Открыть →",
                     color = Accent,
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                 )
             }

