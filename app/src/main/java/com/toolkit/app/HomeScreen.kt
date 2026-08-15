@@ -11,6 +11,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.toolkit.app.ui.Accent
@@ -19,7 +20,7 @@ import com.toolkit.app.ui.TextDim
 import com.toolkit.app.ui.TextMain
 
 @Composable
-fun HomeScreen(onOpenPython: () -> Unit) {
+fun HomeScreen(onOpenPython: () -> Unit, onOpenStresser: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -40,6 +41,52 @@ fun HomeScreen(onOpenPython: () -> Unit) {
             modifier = Modifier.padding(top = 4.dp),
         )
         Spacer(Modifier.height(30.dp))
+
+        GlassCard(
+            modifier = Modifier
+                .align(Alignment.CenterHorizontally)
+                .width(216.dp)
+                .height(236.dp)
+                .clickable(onClick = onOpenStresser),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                WifiIcon(
+                    modifier = Modifier
+                        .padding(top = 10.dp)
+                        .size(46.dp),
+                    color = Accent,
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Wi-Fi Stresser",
+                    color = TextMain,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "стресс-тест сети\nпинг · скорости · график",
+                    color = TextDim,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "Открыть →",
+                    color = Accent,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(18.dp))
 
         GlassCard(
             modifier = Modifier

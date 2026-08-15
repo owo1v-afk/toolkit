@@ -37,8 +37,12 @@ class MainActivity : ComponentActivity() {
                     label = "screen",
                 ) { s ->
                     when (s) {
-                        "home" -> HomeScreen(onOpenPython = { screen = "python" })
+                        "home" -> HomeScreen(
+                            onOpenPython = { screen = "python" },
+                            onOpenStresser = { screen = "stresser" },
+                        )
                         "python" -> PythonScreen(onBack = { screen = "home" })
+                        "stresser" -> WifiStresserScreen(onBack = { screen = "home" })
                     }
                 }
             }
