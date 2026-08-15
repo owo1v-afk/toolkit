@@ -32,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -218,7 +219,8 @@ class StresserEngine(
 
     private fun udpWorker(port: Int) {
         val s = DatagramSocket()
-        val p = Random().nextBytes(1200)
+        val p = ByteArray(1200)
+        Random().nextBytes(p)
         while (running.get()) {
             try {
                 val packet = DatagramPacket(p, p.size, InetSocketAddress(host, port))
@@ -561,13 +563,13 @@ fun WifiStresserScreen(onBack: () -> Unit) {
 
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth()) {
-            StatTile("Скачивание", if (snap.downKBs > 0) "${snap.downKBs.toInt()} КБ/с" else "—")
+            StatTile(Modifier.weight(1f), "Скачивание", if (snap.downKBs > 0) "${snap.downKBs.toInt()} КБ/с" else "—")
             Spacer(Modifier.width(8.dp))
-            StatTile("Отдача", if (snap.upKBs > 0) "${snap.upKBs.toInt()} КБ/с" else "—")
+            StatTile(Modifier.weight(1f), "Отдача", if (snap.upKBs > 0) "${snap.upKBs.toInt()} КБ/с" else "—")
             Spacer(Modifier.width(8.dp))
-            StatTile("Пинг", if (snap.pingMs > 0) "${snap.pingMs.toInt()} мс" else "—")
+            StatTile(Modifier.weight(1f), "Пинг", if (snap.pingMs > 0) "${snap.pingMs.toInt()} мс" else "—")
             Spacer(Modifier.width(8.dp))
-            StatTile("Соединения", "${snap.liveConns}")
+            StatTile(Modifier.weight(1f), "Соединения", "${snap.liveConns}")
         }
 
         Spacer(Modifier.height(12.dp))
@@ -643,8 +645,8 @@ fun WifiStresserScreen(onBack: () -> Unit) {
 }
 
 @Composable
-private fun StatTile(label: String, value: String) {
-    GlassCard(modifier = Modifier.weight(1f)) {
+private fun StatTile(modifier: Modifier, label: String, value: String) {
+    GlassCard(modifier = modifier) {
         Column(
             Modifier.padding(vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
