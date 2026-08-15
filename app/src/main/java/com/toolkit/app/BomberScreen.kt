@@ -245,7 +245,7 @@ fun BomberScreen(onBack: () -> Unit) {
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "● betasms.py встроен в приложение",
+                    "● встроен в приложение, готов к запуску",
                     color = OkGreen,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,

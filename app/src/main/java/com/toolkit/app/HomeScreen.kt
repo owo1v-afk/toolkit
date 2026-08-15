@@ -79,8 +79,8 @@ fun HomeScreen(onOpenPython: () -> Unit, onOpenStresser: () -> Unit, onOpenBombe
                 }
                 Spacer(Modifier.height(14.dp))
                 Text(
-                    "Загрузите ваш .py файл — и он запустится сразу, без лишних команд. " +
-                        "Внутри можно писать: полноценный мини-терминал.",
+                    "Всё уже встроено в приложение — пакеты ставятся автоматически, " +
+                        "запуск в один тап. Внутри можно писать: полноценный мини-терминал.",
                     color = TextDim,
                     fontSize = 13.sp,
                     lineHeight = 18.sp,
