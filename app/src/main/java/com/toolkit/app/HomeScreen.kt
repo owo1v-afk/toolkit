@@ -44,52 +44,6 @@ fun HomeScreen(onOpenPython: () -> Unit, onOpenStresser: () -> Unit) {
 
         GlassCard(
             modifier = Modifier
-                .align(Alignment.CenterHorizontally)
-                .width(216.dp)
-                .height(236.dp)
-                .clickable(onClick = onOpenStresser),
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                WifiIcon(
-                    modifier = Modifier
-                        .padding(top = 10.dp)
-                        .size(46.dp),
-                    color = Accent,
-                )
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    "Wi-Fi Stresser",
-                    color = TextMain,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "стресс-тест сети\nпинг · скорости · график",
-                    color = TextDim,
-                    fontSize = 12.sp,
-                    lineHeight = 16.sp,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.weight(1f))
-                Text(
-                    "Открыть →",
-                    color = Accent,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                )
-            }
-        }
-
-        Spacer(Modifier.height(18.dp))
-
-        GlassCard(
-            modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onOpenPython),
         ) {
@@ -136,6 +90,51 @@ fun HomeScreen(onOpenPython: () -> Unit, onOpenStresser: () -> Unit) {
                     "Открыть →",
                     color = Accent,
                     fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        GlassCard(
+            modifier = Modifier
+                .width(150.dp)
+                .height(158.dp)
+                .clickable(onClick = onOpenStresser),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                WifiIcon(
+                    modifier = Modifier
+                        .padding(top = 6.dp)
+                        .size(36.dp),
+                    color = Accent,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Wi-Fi Stresser",
+                    color = TextMain,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "стресс-тест сети\nпинг · скорости · график",
+                    color = TextDim,
+                    fontSize = 10.5.sp,
+                    lineHeight = 14.sp,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "Открыть →",
+                    color = Accent,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
                 )
             }

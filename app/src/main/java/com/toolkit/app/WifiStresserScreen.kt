@@ -1,6 +1,5 @@
 package com.toolkit.app
 
-import android.speech.tts.TextToSpeech
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -34,15 +33,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.toolkit.app.ui.Accent
@@ -370,7 +374,6 @@ private data class LogLine(val text: String, val color: Color)
 
 @Composable
 fun WifiStresserScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
     var ip by remember { mutableStateOf("192.168.0.1") }
     var running by remember { mutableStateOf(false) }
     var snap by remember { mutableStateOf(StresserSnapshot()) }
@@ -379,15 +382,8 @@ fun WifiStresserScreen(onBack: () -> Unit) {
     val engine = remember { mutableStateOf<StresserEngine?>(null) }
     val wasDropped = remember { mutableStateOf(false) }
     val pingSpiked = remember { mutableStateOf(false) }
-    val tts = remember { mutableStateOf<TextToSpeech?>(null) }
 
     BackHandler(enabled = true, onBack = onBack)
-
-    fun say(text: String) {
-        runCatching {
-            tts.value?.speak(text, TextToSpeech.QUEUE_FLUSH, null, text.hashCode().toString())
-        }
-    }
 
     fun addLog(text: String, color: Color = TextDim) {
         val ts = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
@@ -395,22 +391,6 @@ fun WifiStresserScreen(onBack: () -> Unit) {
         if (logs.size > 80) logs.removeAt(0)
     }
 
-    LaunchedEffect(Unit) {
-        var t: TextToSpeech? = null
-        t = TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                t?.language = Locale("ru", "RU")
-                t?.setSpeechRate(0.95f)
-            }
-        }
-        tts.value = t
-    }
-    DisposableEffect(Unit) {
-        onDispose {
-            runCatching { tts.value?.stop() }
-            runCatching { tts.value?.shutdown() }
-        }
-    }
     LaunchedEffect(logs.size) {
         if (logs.isNotEmpty()) runCatching { listState.scrollToItem(logs.size - 1) }
     }
@@ -419,14 +399,12 @@ fun WifiStresserScreen(onBack: () -> Unit) {
         running = false
         engine.value?.stop()
         engine.value = null
-        say("Стрессер остановлен")
     }
 
     fun startStresser() {
         val h = ip.trim()
         if (!Regex("^\\d{1,3}(\\.\\d{1,3}){3}\$").matches(h)) {
             addLog("Некорректный IP-адрес: $h", WarnOrange)
-            say("Некорректный IP адрес")
             return
         }
         logs.clear()
@@ -440,7 +418,6 @@ fun WifiStresserScreen(onBack: () -> Unit) {
                 if (m.pingMs > 1000 && !pingSpiked.value) {
                     pingSpiked.value = true
                     addLog("Пинг подскочил: ${m.pingMs.toInt()} мс", WarnOrange)
-                    say("Внимание, пинг высокий: ${m.pingMs.toInt()} миллисекунд")
                 } else if (m.pingMs < 400 && pingSpiked.value) {
                     pingSpiked.value = false
                 }
@@ -449,14 +426,12 @@ fun WifiStresserScreen(onBack: () -> Unit) {
             onDrop = {
                 wasDropped.value = true
                 addLog("Интернет упал! Нет ответа от роутера", Color(0xFFFF6B6B))
-                say("Внимание, интернет упал")
             },
         )
         engine.value = e
         running = true
         addLog("Подключение к сети…", AccentSoft)
         e.start()
-        say("Стрессер запущен")
     }
 
     Column(
@@ -563,9 +538,9 @@ fun WifiStresserScreen(onBack: () -> Unit) {
 
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth()) {
-            StatTile(Modifier.weight(1f), "Скачивание", if (snap.downKBs > 0) "${snap.downKBs.toInt()} КБ/с" else "—")
+            StatTile(Modifier.weight(1f), "Скачивание", speedStr(snap.downKBs))
             Spacer(Modifier.width(8.dp))
-            StatTile(Modifier.weight(1f), "Отдача", if (snap.upKBs > 0) "${snap.upKBs.toInt()} КБ/с" else "—")
+            StatTile(Modifier.weight(1f), "Отдача", speedStr(snap.upKBs))
             Spacer(Modifier.width(8.dp))
             StatTile(Modifier.weight(1f), "Пинг", if (snap.pingMs > 0) "${snap.pingMs.toInt()} мс" else "—")
             Spacer(Modifier.width(8.dp))
@@ -648,75 +623,134 @@ fun WifiStresserScreen(onBack: () -> Unit) {
 private fun StatTile(modifier: Modifier, label: String, value: String) {
     GlassCard(modifier = modifier) {
         Column(
-            Modifier.padding(vertical = 12.dp),
+            Modifier
+                .fillMaxWidth()
+                .height(58.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
         ) {
-            Text(label, color = TextDim, fontSize = 10.sp)
-            Spacer(Modifier.height(4.dp))
+            Text(label, color = TextDim, fontSize = 10.sp, maxLines = 1)
+            Spacer(Modifier.height(3.dp))
             Text(
                 value,
                 color = TextMain,
-                fontSize = 13.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                softWrap = false,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Clip,
+                modifier = Modifier.padding(horizontal = 4.dp),
             )
         }
     }
 }
 
+private fun speedStr(kbs: Float): String {
+    if (kbs <= 0f) return "—"
+    if (kbs >= 1024f) return "%.1f МБ/с".format(Locale.US, kbs / 1024f)
+    return "${kbs.toInt()} КБ/с"
+}
+
 @Composable
 private fun LatencyGraph(history: List<Float>?) {
+    val textMeasurer = rememberTextMeasurer()
+    val labelStyle = TextStyle(color = TextDim, fontSize = 9.sp)
     Canvas(
         modifier = Modifier
             .fillMaxWidth()
-            .height(120.dp),
+            .height(140.dp),
     ) {
         val pts = history ?: return@Canvas
         val n = pts.size
+        val w = size.width
+        val h = size.height
         if (n == 0) {
-            val y = size.height / 2f
-            drawLine(BorderGlass, Offset(0f, y), Offset(size.width, y), strokeWidth = 1.5f)
+            drawLine(BorderGlass, Offset(0f, h / 2f), Offset(w, h / 2f), strokeWidth = 1.5f)
             return@Canvas
         }
         val from = max(0, n - 60)
         val data = pts.subList(from, n)
-        val maxV = max(250f, data.filter { it >= 0 }.maxOrNull() ?: 250f) * 1.2f
-        val w = size.width
-        val h = size.height
-        for (g in 1..3) {
+        val goodMax = data.filter { it >= 0 }.maxOrNull()
+        val maxV = max(250f, goodMax ?: 250f) * 1.15f
+        fun xAt(i: Int) = w * (from + i) / 59f
+        fun yAt(v: Float) = h - (min(v, maxV) / maxV) * h
+
+        for (g in 0..4) {
             val y = h - h * g / 4f
-            drawLine(BorderGlass, Offset(0f, y), Offset(w, y), strokeWidth = 1f)
+            drawLine(
+                if (g == 0) BorderGlass.copy(alpha = 0.5f) else BorderGlass,
+                Offset(0f, y),
+                Offset(w, y),
+                strokeWidth = if (g == 0) 1.5f else 1f,
+            )
+            val label = textMeasurer.measure(
+                AnnotatedString("${(maxV * g / 4f).toInt()} мс"),
+                labelStyle,
+            )
+            drawText(label, topLeft = Offset(5.dp.toPx(), y - label.size.height - 2.dp.toPx()))
         }
-        val path = Path()
-        var started = false
+        val timeLabel = textMeasurer.measure(AnnotatedString("60 с"), labelStyle)
+        drawText(timeLabel, topLeft = Offset(w - timeLabel.size.width - 5.dp.toPx(), h - timeLabel.size.height - 2.dp.toPx()))
+
+        val goodPts = ArrayList<Offset>(data.size)
+        val dropXs = ArrayList<Float>(4)
         data.forEachIndexed { i, v ->
-            val x = w * (from + i) / 59f
-            if (v >= 0) {
-                val y = h - (minOf(v, maxV) / maxV) * h
-                if (!started) {
-                    path.moveTo(x, y)
-                    started = true
-                } else {
-                    path.lineTo(x, y)
+            val x = xAt(i)
+            if (v >= 0) goodPts.add(Offset(x, yAt(v))) else dropXs.add(x)
+        }
+
+        if (goodPts.isNotEmpty()) {
+            val line = Path()
+            line.moveTo(goodPts[0].x, goodPts[0].y)
+            if (goodPts.size >= 2) {
+                for (i in 1 until goodPts.size - 1) {
+                    val midX = (goodPts[i].x + goodPts[i + 1].x) / 2f
+                    val midY = (goodPts[i].y + goodPts[i + 1].y) / 2f
+                    line.quadraticTo(goodPts[i].x, goodPts[i].y, midX, midY)
                 }
+                line.lineTo(goodPts.last().x, goodPts.last().y)
             }
-        }
-        if (started) {
-            drawPath(path, Accent, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
-        }
-        data.forEachIndexed { i, v ->
-            if (v < 0) {
-                val x = w * (from + i) / 59f
-                val y = h - 6.dp.toPx()
-                drawLine(Color(0xFFFF6B6B), Offset(x - 4.dp.toPx(), y), Offset(x + 4.dp.toPx(), y), strokeWidth = 2.5f, cap = StrokeCap.Round)
-                drawLine(Color(0xFFFF6B6B), Offset(x, y - 4.dp.toPx()), Offset(x, y + 4.dp.toPx()), strokeWidth = 2.5f, cap = StrokeCap.Round)
+            val area = Path()
+            area.moveTo(goodPts[0].x, h)
+            if (goodPts.size >= 2) {
+                area.lineTo(goodPts[0].x, goodPts[0].y)
+                for (i in 1 until goodPts.size - 1) {
+                    val midX = (goodPts[i].x + goodPts[i + 1].x) / 2f
+                    val midY = (goodPts[i].y + goodPts[i + 1].y) / 2f
+                    area.quadraticTo(goodPts[i].x, goodPts[i].y, midX, midY)
+                }
+                area.lineTo(goodPts.last().x, goodPts.last().y)
+            } else {
+                area.lineTo(goodPts[0].x, goodPts[0].y)
             }
+            area.lineTo(goodPts.last().x, h)
+            area.close()
+            drawPath(
+                area,
+                Brush.verticalGradient(
+                    listOf(Accent.copy(alpha = 0.22f), Color.Transparent),
+                    startY = 0f,
+                    endY = h,
+                ),
+                style = Fill,
+            )
+            drawPath(line, Accent, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
         }
+
+        dropXs.forEach { x ->
+            drawLine(
+                Color(0xFFFF6B6B).copy(alpha = 0.5f),
+                Offset(x, 0f),
+                Offset(x, h),
+                strokeWidth = 1.5f,
+            )
+            drawCircle(Color(0xFFFF6B6B), radius = 3.5.dp.toPx(), center = Offset(x, h - 10.dp.toPx()))
+        }
+
         val last = data.lastOrNull()
         if (last != null && last >= 0) {
-            val x = w * (from + data.size - 1) / 59f
-            val y = h - (minOf(last, maxV) / maxV) * h
-            drawCircle(AccentSoft, radius = 4.dp.toPx(), center = Offset(x, y))
+            drawCircle(AccentSoft, radius = 4.dp.toPx(), center = Offset(xAt(from + data.size - 1), yAt(last)))
         }
     }
 }
