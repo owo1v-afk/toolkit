@@ -578,22 +578,6 @@ fun WifiStresserScreen(onBack: () -> Unit) {
         engine.value = null
     }
 
-    fun startHotspot() {
-        if (running) {
-            stopStresser()
-            return
-        }
-        val gw = detectGateway(ctx)
-        if (gw == null) {
-            addLog("Не удалось найти шлюз сети. Подключитесь к Wi-Fi или включите раздачу.", WarnOrange)
-            return
-        }
-        ip = gw
-        mode = 3
-        startStresser()
-        addLog("Раздача интернета найдена: шлюз $gw — стрессирую для всех клиентов", Accent)
-    }
-
     fun startStresser() {
         var h = ip.trim()
         var p = 80
@@ -650,6 +634,22 @@ fun WifiStresserScreen(onBack: () -> Unit) {
         running = true
         addLog("Подключение к сети…", AccentSoft)
         e.start()
+    }
+
+    fun startHotspot() {
+        if (running) {
+            stopStresser()
+            return
+        }
+        val gw = detectGateway(ctx)
+        if (gw == null) {
+            addLog("Не удалось найти шлюз сети. Подключитесь к Wi-Fi или включите раздачу.", WarnOrange)
+            return
+        }
+        ip = gw
+        mode = 3
+        startStresser()
+        addLog("Раздача интернета найдена: шлюз $gw — стрессирую для всех клиентов", Accent)
     }
 
     Column(
