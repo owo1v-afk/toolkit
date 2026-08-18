@@ -41,10 +41,12 @@ class MainActivity : ComponentActivity() {
                             onOpenPython = { screen = "python" },
                             onOpenStresser = { screen = "stresser" },
                             onOpenBomber = { screen = "bomber" },
+                            onOpenDdos = { screen = "ddos" },
                         )
                         "python" -> PythonScreen(onBack = { screen = "home" })
                         "stresser" -> WifiStresserScreen(onBack = { screen = "home" })
                         "bomber" -> BomberScreen(onBack = { screen = "home" })
+                        "ddos" -> DdosScreen(onBack = { screen = "home" })
                     }
                 }
             }

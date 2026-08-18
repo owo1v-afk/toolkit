@@ -20,7 +20,12 @@ import com.toolkit.app.ui.TextDim
 import com.toolkit.app.ui.TextMain
 
 @Composable
-fun HomeScreen(onOpenPython: () -> Unit, onOpenStresser: () -> Unit, onOpenBomber: () -> Unit) {
+fun HomeScreen(
+    onOpenPython: () -> Unit,
+    onOpenStresser: () -> Unit,
+    onOpenBomber: () -> Unit,
+    onOpenDdos: () -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -182,6 +187,58 @@ fun HomeScreen(onOpenPython: () -> Unit, onOpenStresser: () -> Unit, onOpenBombe
                         fontWeight = FontWeight.Medium,
                     )
                 }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        GlassCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onOpenDdos),
+        ) {
+            Column(Modifier.padding(22.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        DdosIcon(
+                            modifier = Modifier.size(40.dp),
+                            color = Accent,
+                        )
+                    }
+                    Column(Modifier.padding(start = 10.dp)) {
+                        Text(
+                            "DDoS",
+                            color = TextMain,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            "флуд по сайту · https · один телефон",
+                            color = TextDim,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    "Жёсткий комбинированный флуд с обходами защит: RAW HTTP, HTTP/2 RST_STREAM, " +
+                        "TLS CPU и RAM, HEAD-шторм — всё в один тап, без root.",
+                    color = TextDim,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                )
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "Открыть →",
+                    color = Accent,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                )
             }
         }
 

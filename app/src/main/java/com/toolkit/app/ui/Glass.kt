@@ -39,3 +39,12 @@ fun GlassCard(
 }
 
 val GlassRadius = RoundedCornerShape(20.dp)
+
+fun flatButtonElevation(): androidx.compose.material3.ButtonElevation =
+    androidx.compose.material3.ButtonDefaults.buttonElevation(
+        defaultElevation = 0.dp,
+        pressedElevation = 0.dp,
+        focusedElevation = 0.dp,
+        hoveredElevation = 0.dp,
+        disabledElevation = 0.dp,
+    )

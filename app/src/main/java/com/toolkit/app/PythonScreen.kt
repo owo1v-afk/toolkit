@@ -54,6 +54,7 @@ import com.toolkit.app.ui.TerminalBg
 import com.toolkit.app.ui.TerminalText
 import com.toolkit.app.ui.TextDim
 import com.toolkit.app.ui.TextMain
+import com.toolkit.app.ui.flatButtonElevation
 import com.toolkit.app.ui.WarnOrange
 import java.io.File
 import kotlinx.coroutines.delay
@@ -417,7 +418,8 @@ fun PythonScreen(onBack: () -> Unit) {
         Button(
             onClick = { picker.launch(arrayOf("*/*")) },
             colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color(0xFF0E1013)),
-            shape = RoundedCornerShape(18.dp),
+            elevation = flatButtonElevation(),
+                    shape = RoundedCornerShape(18.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(
@@ -493,6 +495,7 @@ fun PythonScreen(onBack: () -> Unit) {
                         disabledContainerColor = CardGlass,
                         disabledContentColor = TextDim,
                     ),
+                    elevation = flatButtonElevation(),
                     shape = RoundedCornerShape(18.dp),
                     modifier = Modifier.weight(1f),
                 ) {
@@ -514,7 +517,8 @@ fun PythonScreen(onBack: () -> Unit) {
                             containerColor = Color(0x33F4B400),
                             contentColor = WarnOrange,
                         ),
-                        shape = RoundedCornerShape(18.dp),
+                        elevation = flatButtonElevation(),
+                    shape = RoundedCornerShape(18.dp),
                     ) {
                         Text(
                             "Стоп",
@@ -736,6 +740,7 @@ fun TerminalView(
                         unfocusedContainerColor = Color(0x0DFFFFFF),
                         cursorColor = Accent,
                     ),
+
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.weight(1f),
                 )
@@ -746,6 +751,7 @@ fun TerminalView(
                         containerColor = Accent,
                         contentColor = Color(0xFF0E1013),
                     ),
+                    elevation = flatButtonElevation(),
                     shape = RoundedCornerShape(14.dp),
                 ) {
                     Text("▶", fontSize = 14.sp)

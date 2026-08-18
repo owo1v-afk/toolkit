@@ -51,6 +51,7 @@ import com.toolkit.app.ui.OkGreen
 import com.toolkit.app.ui.TextDim
 import com.toolkit.app.ui.TextMain
 import com.toolkit.app.ui.WarnOrange
+import com.toolkit.app.ui.flatButtonElevation
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -265,6 +266,7 @@ fun BomberScreen(onBack: () -> Unit) {
                         keyboardType = KeyboardType.Phone,
                         imeAction = ImeAction.Next,
                     ),
+
                     shape = RoundedCornerShape(14.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Accent,
@@ -292,6 +294,7 @@ fun BomberScreen(onBack: () -> Unit) {
                         imeAction = ImeAction.Done,
                     ),
                     keyboardActions = KeyboardActions(onDone = { if (!running) startBomber() }),
+
                     shape = RoundedCornerShape(14.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Accent,
@@ -308,6 +311,7 @@ fun BomberScreen(onBack: () -> Unit) {
                         containerColor = if (running) Color(0xFFB3261E) else Accent,
                         contentColor = if (running) Color.White else Color(0xFF0E1013),
                     ),
+                    elevation = flatButtonElevation(),
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier
                         .fillMaxWidth()

