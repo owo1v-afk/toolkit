@@ -505,3 +505,22 @@ def run_source(source, cwd="", args_str=""):
     finally:
         TerminalIO.append("\n[процесс завершен]\n")
         TerminalIO.finished()
+
+
+def run_module(name, args_str=""):
+    _prepare(None, name, args_str)
+    try:
+        import importlib
+        mod = importlib.import_module(name)
+        main = getattr(mod, "main", None)
+        if callable(main):
+            main()
+        else:
+            TerminalIO.append("[ошибка] в модуле %s нет функции main()\n" % name)
+    except SystemExit:
+        pass
+    except BaseException:
+        traceback.print_exc()
+    finally:
+        TerminalIO.append("\n[процесс завершен]\n")
+        TerminalIO.finished()

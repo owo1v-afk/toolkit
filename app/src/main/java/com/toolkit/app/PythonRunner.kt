@@ -91,4 +91,23 @@ object PythonRunner {
             }
         }, "py-runner").start()
     }
+
+    fun runModule(context: Context, module: String, args: List<String>) {
+        if (running) {
+            TerminalIO.append("Скрипт уже выполняется. Нажмите Стоп или дождитесь завершения.\n")
+            return
+        }
+        ensureStarted(context)
+        running = true
+        Thread({
+            try {
+                val py = Python.getInstance()
+                py.getModule("runner").callAttr("run_module", module, args.joinToString("\u0000"))
+            } catch (t: Throwable) {
+                TerminalIO.append("Ошибка запуска: ${t.message}\n")
+            } finally {
+                running = false
+            }
+        }, "py-runner").start()
+    }
 }

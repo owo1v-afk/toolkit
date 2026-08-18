@@ -216,7 +216,7 @@ fun HomeScreen(
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            "флуд по сайту · https · один телефон",
+                            "флуд по сайту · MHDDoS · один телефон",
                             color = TextDim,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(top = 2.dp),
@@ -225,8 +225,8 @@ fun HomeScreen(
                 }
                 Spacer(Modifier.height(14.dp))
                 Text(
-                    "Жёсткий комбинированный флуд: RAW HTTP, HTTP/2 RST, TLS CPU/RAM, " +
-                        "HEAD-шторм + встроенный прокси-пул против банов.",
+                    "MHDDoS: BYPASS против Cloudflare, BOT, SLOW, CFB, PPS, KILLER и другие " +
+                        "методы + прокси против банов.",
                     color = TextDim,
                     fontSize = 13.sp,
                     lineHeight = 18.sp,

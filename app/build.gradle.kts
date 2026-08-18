@@ -71,6 +71,11 @@ chaquopy {
             install("beautifulsoup4")
             install("httpx")
             install("aiohttp")
+            install("pysocks")
+            install("certifi")
+            install("dnspython")
+            install("cloudscraper")
+            install("icmplib")
         }
     }
 }
