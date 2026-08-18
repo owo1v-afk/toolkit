@@ -789,7 +789,6 @@ fun speedStr(kbs: Float): String {
 }
 
 @Composable
-fun LatencyGraph(@Composable
 fun LatencyGraph(history: List<Float>?) {
     val textMeasurer = rememberTextMeasurer()
     val labelStyle = TextStyle(color = TextDim, fontSize = 9.sp)
