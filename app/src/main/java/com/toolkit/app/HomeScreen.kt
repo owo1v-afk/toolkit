@@ -84,8 +84,7 @@ fun HomeScreen(
                 }
                 Spacer(Modifier.height(14.dp))
                 Text(
-                    "Всё уже встроено в приложение — запуск в один тап. " +
-                        "Внутри можно писать: полноценный мини-терминал.",
+                    "Всё встроено — запуск в один тап, внутри полноценный мини-терминал.",
                     color = TextDim,
                     fontSize = 13.sp,
                     lineHeight = 18.sp,
@@ -226,8 +225,8 @@ fun HomeScreen(
                 }
                 Spacer(Modifier.height(14.dp))
                 Text(
-                    "Жёсткий комбинированный флуд с обходами защит: RAW HTTP, HTTP/2 RST_STREAM, " +
-                        "TLS CPU и RAM, HEAD-шторм — всё в один тап, без root.",
+                    "Жёсткий комбинированный флуд: RAW HTTP, HTTP/2 RST, TLS CPU/RAM, " +
+                        "HEAD-шторм + встроенный прокси-пул против банов.",
                     color = TextDim,
                     fontSize = 13.sp,
                     lineHeight = 18.sp,

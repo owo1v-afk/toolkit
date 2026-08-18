@@ -17,7 +17,7 @@ import androidx.compose.ui.unit.dp
 fun GlassCard(
     modifier: Modifier = Modifier,
     radius: Dp = 26.dp,
-    tint: Color = Color(0x14FFFFFF),
+    tint: Color = Color(0x0CFFFFFF),
     content: @Composable BoxScope.() -> Unit,
 ) {
     val shape = RoundedCornerShape(radius)
@@ -27,9 +27,9 @@ fun GlassCard(
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color(0x22FFFFFF),
+                        Color(0x14FFFFFF),
                         tint,
-                        Color(0x0AFFFFFF),
+                        Color(0x05FFFFFF),
                     )
                 )
             ),

